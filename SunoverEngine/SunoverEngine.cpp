@@ -1,12 +1,3 @@
-﻿// SunoverEngine.cpp: определяет точку входа для приложения.
-//
-
-#include "SunoverEngine.h"
-
-using namespace std;
-
-int main()
-{
-	cout << "Hello CMake." << endl;
-	return 0;
-}
+﻿// SunoverEngine.cpp
+// Точка сборки — все реализации живут в своих подпапках (Core, Systems и т.д.)
+// Этот файл намеренно пуст.

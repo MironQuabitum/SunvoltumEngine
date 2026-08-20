@@ -1,8 +1,31 @@
-﻿// SunoverEngine.h : включаемый файл для стандартных системных включаемых файлов
-// или включаемые файлы для конкретного проекта.
+﻿#pragma once
 
-#pragma once
+// Публичный API SunoverEngine
+// Клиентский проект подключает только этот заголовок
 
-#include <iostream>
-
-// TODO: установите здесь ссылки на дополнительные заголовки, требующиеся для программы.
+#include "LibSunover.h"
+#include "Types/EngineMode.h"
+#include "Types/Vector2.h"
+#include "Types/Vector3.h"
+#include "Types/Matrix3x3.h"
+#include "Types/CFrame.h"
+#include "Types/Color3.h"
+#include "Types/Shape.h"
+#include "Types/Number.h"
+#include "Types/CameraType.h"
+#include "Types/Mesh.h"
+#include "DataModel/InstanceParent.h"
+#include "DataModel/DataModel.h"
+#include "DataModel/InstanceClasses/Workspace.h"
+#include "DataModel/InstanceClasses/CurrentCamera.h"
+#include "DataModel/InstanceClasses/ShapePart.h"
+#include "DataModel/InstanceClasses/Lighting.h"
+#include "DataModel/InstanceClasses/Players.h"
+#include "Runtime/Runtime.h"
+#include "Rendering/RenderBridge.h"
+#include "Formats/SMesh.h"
+#include "Formats/SWorld.h"
+#include "Shapes/Block.h"
+#include "Shapes/Sphere.h"
+#include "Shapes/Cylinder.h"
+#include "Core/Engine.h"

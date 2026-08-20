@@ -1,0 +1,57 @@
+#include "Instance.h"
+
+namespace Sunover {
+
+    Instance::Instance(const std::string& name, ClassId classId, InstanceParent* parent)
+        : m_name(name), m_classId(classId), m_parent(parent) {}
+
+    const std::string& Instance::GetName()    const { return m_name;    }
+    ClassId            Instance::GetClassId() const { return m_classId; }
+
+    InstanceParent* Instance::GetParent() const     { return m_parent; }
+    void Instance::SetParent(InstanceParent* p)     { m_parent = p;    }
+
+    Instance& Instance::AddInstance(const std::string& name, ClassId classId)
+    {
+        m_children.push_back(std::make_unique<Instance>(name, classId, this));
+        return *m_children.back();
+    }
+
+    Instance* Instance::FindByName(const std::string& name)
+    {
+        for (auto& child : m_children)
+            if (child->GetName() == name) return child.get();
+        return nullptr;
+    }
+
+    const std::vector<std::unique_ptr<Instance>>& Instance::GetChildren() const
+    {
+        return m_children;
+    }
+
+    void Instance::SetProperty(PropertyId id, const PropertyValue& value, bool readOnly)
+    {
+        m_properties[id] = { value, readOnly };
+    }
+
+    const PropertyEntry* Instance::GetPropertyEntry(PropertyId id) const
+    {
+        auto it = m_properties.find(id);
+        if (it == m_properties.end()) return nullptr;
+        return &it->second;
+    }
+
+    const PropertyValue* Instance::GetProperty(PropertyId id) const
+    {
+        auto* entry = GetPropertyEntry(id);
+        return entry ? &entry->Value : nullptr;
+    }
+
+    bool Instance::HasProperty(PropertyId id) const { return m_properties.count(id) > 0; }
+    bool Instance::IsReadOnly(PropertyId id)  const
+    {
+        auto* entry = GetPropertyEntry(id);
+        return entry ? entry->ReadOnly : false;
+    }
+
+} // namespace Sunover

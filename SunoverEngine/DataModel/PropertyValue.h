@@ -1,0 +1,93 @@
+#pragma once
+
+#include <cstdint>
+#include "../Types/Color3.h"
+#include "../Types/Vector2.h"
+#include "../Types/Vector3.h"
+#include "../Types/CFrame.h"
+#include "../Types/Number.h"
+#include "../Types/CameraType.h"
+#include "../Types/Shape.h"
+
+namespace Sunover {
+
+    enum class PropertyType : uint8_t
+    {
+        Bool,
+        Int,
+        Float,
+        Number,
+        Vector2,
+        Vector3,
+        Color3,
+        CFrame,
+        CameraType,
+        Shape,
+    };
+
+    struct PropertyValue
+    {
+        PropertyType Type = PropertyType::Int;
+
+        union Data
+        {
+            bool                 AsBool;
+            int32_t              AsInt;
+            float                AsFloat;
+            Sunover::Number      AsNumber;
+            Sunover::Vector2     AsVector2;
+            Sunover::Vector3     AsVector3;
+            Sunover::Color3      AsColor3;
+            Sunover::CFrame      AsCFrame;
+            Sunover::CameraType  AsCameraType;
+            Sunover::Shape       AsShape;
+
+            Data() : AsInt(0) {}
+            ~Data() {}
+        } Value;
+
+        PropertyValue() = default;
+
+        static PropertyValue Bool(bool v)
+        {
+            PropertyValue p; p.Type = PropertyType::Bool; p.Value.AsBool = v; return p;
+        }
+        static PropertyValue Int(int32_t v)
+        {
+            PropertyValue p; p.Type = PropertyType::Int; p.Value.AsInt = v; return p;
+        }
+        static PropertyValue Float(float v)
+        {
+            PropertyValue p; p.Type = PropertyType::Float; p.Value.AsFloat = v; return p;
+        }
+        static PropertyValue Number(Sunover::Number v)
+        {
+            PropertyValue p; p.Type = PropertyType::Number; p.Value.AsNumber = v; return p;
+        }
+        static PropertyValue Vector2(const Sunover::Vector2& v)
+        {
+            PropertyValue p; p.Type = PropertyType::Vector2; p.Value.AsVector2 = v; return p;
+        }
+        static PropertyValue Vector3(const Sunover::Vector3& v)
+        {
+            PropertyValue p; p.Type = PropertyType::Vector3; p.Value.AsVector3 = v; return p;
+        }
+        static PropertyValue Color3(const Sunover::Color3& v)
+        {
+            PropertyValue p; p.Type = PropertyType::Color3; p.Value.AsColor3 = v; return p;
+        }
+        static PropertyValue CFrame(const Sunover::CFrame& v)
+        {
+            PropertyValue p; p.Type = PropertyType::CFrame; p.Value.AsCFrame = v; return p;
+        }
+        static PropertyValue CameraType(Sunover::CameraType v)
+        {
+            PropertyValue p; p.Type = PropertyType::CameraType; p.Value.AsCameraType = v; return p;
+        }
+        static PropertyValue Shape(Sunover::Shape v)
+        {
+            PropertyValue p; p.Type = PropertyType::Shape; p.Value.AsShape = v; return p;
+        }
+    };
+
+} // namespace Sunover

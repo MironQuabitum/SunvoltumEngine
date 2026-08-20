@@ -13,3 +13,4 @@ project ("SunoverEngine")
 
 # Включите подпроекты.
 add_subdirectory ("SunoverEngine")
+add_subdirectory ("SunoverClient")
