@@ -1,6 +1,7 @@
 #pragma once
 
 #include <cstdint>
+#include <string>
 #include "../Types/Color3.h"
 #include "../Types/Vector2.h"
 #include "../Types/Vector3.h"
@@ -23,6 +24,7 @@ namespace Sunover {
         CFrame,
         CameraType,
         Shape,
+        String,     // std::string — хранится в поле StringValue, а не в union
     };
 
     struct PropertyValue
@@ -45,6 +47,10 @@ namespace Sunover {
             Data() : AsInt(0) {}
             ~Data() {}
         } Value;
+
+        // Строковое значение — хранится отдельно от union
+        // (std::string нельзя поместить в union без placement new/destroy)
+        std::string StringValue;
 
         PropertyValue() = default;
 
@@ -87,6 +93,10 @@ namespace Sunover {
         static PropertyValue Shape(Sunover::Shape v)
         {
             PropertyValue p; p.Type = PropertyType::Shape; p.Value.AsShape = v; return p;
+        }
+        static PropertyValue String(const std::string& v)
+        {
+            PropertyValue p; p.Type = PropertyType::String; p.StringValue = v; return p;
         }
     };
 

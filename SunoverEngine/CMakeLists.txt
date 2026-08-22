@@ -28,11 +28,12 @@ add_library(LibSunover SHARED
     # Rendering
     "Rendering/RenderBridge.h"
     "Rendering/Bridge/BridgeCommon.h"
-    "Rendering/Bridge/RenderBridge_Init.cpp"
-    "Rendering/Bridge/RenderBridge_Frame.cpp"
-    "Rendering/Bridge/RenderBridge_SyncCamera.cpp"
-    "Rendering/Bridge/RenderBridge_SyncLighting.cpp"
-    "Rendering/Bridge/RenderBridge_SyncScene.cpp"
+    "Rendering/Bridge/Init.cpp"
+    "Rendering/Bridge/Frame.cpp"
+    "Rendering/Bridge/SyncCamera.cpp"
+    "Rendering/Bridge/SyncLighting.cpp"
+    "Rendering/Bridge/SyncScene.cpp"
+    "Rendering/Bridge/SyncSkyBox.cpp"
 
     # DataModel
     "DataModel/InstanceParent.h"
@@ -49,6 +50,8 @@ add_library(LibSunover SHARED
     "DataModel/InstanceClasses/ShapePart.h"
     "DataModel/InstanceClasses/Lighting.h"
     "DataModel/InstanceClasses/Players.h"
+    "DataModel/InstanceClasses/Decal.h"
+    "DataModel/InstanceClasses/TextureSurface.h"
 
     # Formats
     "Formats/SMesh.h"
@@ -65,7 +68,7 @@ add_library(LibSunover SHARED
 set_target_properties(LibSunover PROPERTIES OUTPUT_NAME "LibSunover")
 
 if (CMAKE_VERSION VERSION_GREATER 3.12)
-    set_property(TARGET LibSunover PROPERTY CXX_STANDARD 20)
+    set_property(TARGET LibSunover PROPERTY CXX_STANDARD 17)
 endif()
 
 target_compile_definitions(LibSunover PRIVATE SUNOVER_BUILD_DLL)

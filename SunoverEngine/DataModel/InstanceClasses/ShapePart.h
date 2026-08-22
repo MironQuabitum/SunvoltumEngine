@@ -31,6 +31,9 @@ namespace Classes {
 
         // Форма объекта (Ball, Block, Cylinder)
         static constexpr PropertyId Shape        = 6; // Shape
+
+        // Размер объекта по трём осям (Vector3, в стадах)
+        static constexpr PropertyId Size         = 7; // Vector3
     };
 
 } // namespace Classes

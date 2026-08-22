@@ -30,6 +30,9 @@ namespace Sunover {
         SyncLighting();
 
         m_renderer->BeginFrame();
+
+        if (m_skyBox) m_renderer->RenderSkyBox(*m_skyBox, *m_camera);
+
         SyncScene();
         m_renderer->RenderSunLight(*m_sunLight);
         m_renderer->EndFrame();

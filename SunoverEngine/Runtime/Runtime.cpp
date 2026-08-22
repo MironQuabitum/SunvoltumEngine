@@ -32,8 +32,6 @@ namespace Sunover {
 
         while (m_running)
         {
-            // --- Обработка событий окна ---
-            // Если окно закрыто — выходим из цикла
             if (m_renderBridge && m_renderBridge->IsInitialized())
             {
                 if (!m_renderBridge->PollEvents())
@@ -47,28 +45,21 @@ namespace Sunover {
             float     deltaTime   = Duration(currentTime - previousTime).count();
             previousTime = currentTime;
 
-            // Защита от слишком большого шага (пауза отладчика и т.д.)
             if (deltaTime > 0.25f) deltaTime = 0.25f;
 
-            // --- RenderBridge::Frame — синхронизация сцены и рендер ---
             if (m_renderBridge && m_renderBridge->IsInitialized())
                 m_renderBridge->Frame(deltaTime);
 
-            // --- RenderStepped: пользовательский код после рендера ---
             if (RenderStepped) RenderStepped(deltaTime);
 
-            // --- Фиксированный тик 60/с ---
             accumulator += deltaTime;
-
             while (accumulator >= FIXED_TIMESTEP)
             {
                 if (PreSimulation)  PreSimulation(FIXED_TIMESTEP);
                 if (PostSimulation) PostSimulation(FIXED_TIMESTEP);
-
                 accumulator -= FIXED_TIMESTEP;
             }
 
-            // --- Heartbeat: конец кадра ---
             if (Heartbeat) Heartbeat(deltaTime);
         }
     }

@@ -33,7 +33,9 @@ namespace Formats {
         uint8_t len = 0;
         if (!ReadRaw(s, len)) return false;
         out.resize(len);
-        return static_cast<bool>(s.read(out.data(), len));
+        // data() на string до C++17 возвращает const char* — используем &out[0]
+        if (len == 0) return true;
+        return static_cast<bool>(s.read(&out[0], len));
     }
 
     // --- Запись одного свойства ---
@@ -137,8 +139,8 @@ namespace Formats {
             auto propCount = static_cast<uint8_t>(props.size());
             if (!WriteRaw(stream, propCount)) return false;
 
-            for (auto& [id, entry] : props)
-                if (!WriteProperty(stream, id, *entry)) return false;
+            for (size_t pi = 0; pi < props.size(); pi++)
+                if (!WriteProperty(stream, props[pi].first, *props[pi].second)) return false;
         }
 
         return true;

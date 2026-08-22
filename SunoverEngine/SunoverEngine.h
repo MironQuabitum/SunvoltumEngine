@@ -21,6 +21,8 @@
 #include "DataModel/InstanceClasses/ShapePart.h"
 #include "DataModel/InstanceClasses/Lighting.h"
 #include "DataModel/InstanceClasses/Players.h"
+#include "DataModel/InstanceClasses/Decal.h"
+#include "DataModel/InstanceClasses/TextureSurface.h"
 #include "Runtime/Runtime.h"
 #include "Rendering/RenderBridge.h"
 #include "Formats/SMesh.h"
