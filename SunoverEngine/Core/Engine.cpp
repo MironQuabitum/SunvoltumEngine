@@ -27,6 +27,18 @@ namespace Sunover {
         //   Server     — Luau VM + сетевой сервер (без рендера)
     }
 
+    void Engine::PhysicsTick(float fixedDelta)
+    {
+        if (!m_initialized) return;
+
+        // Инициализируем PhysicsBridge при первом тике —
+        // к этому моменту DataModel уже заполнен объектами из main().
+        if (!Physics.IsInitialized())
+            Physics.Init(*this);
+
+        Physics.Step(fixedDelta);
+    }
+
     void Engine::Tick(float deltaTime)
     {
         if (!m_initialized) return;
@@ -37,6 +49,8 @@ namespace Sunover {
     void Engine::Shutdown()
     {
         if (!m_initialized) return;
+
+        Physics.Shutdown();
 
         std::cout << "[SunoverEngine] Shutdown" << std::endl;
 

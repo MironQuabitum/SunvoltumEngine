@@ -32,6 +32,20 @@ namespace Sunover {
 
         InitSkyBox();
 
+        // Курсор — загружаем текстуру из PlatformContent
+        {
+            MeturmRender::Texture cursorTex;
+            std::ifstream f("PlatformContent/textures/cursor/ArrowFarCursor.dds",
+                            std::ios::binary);
+            if (f.is_open())
+                cursorTex.LoadTexture(MeturmRender::RenderType::OpenGL, f);
+
+            m_cursor = new MeturmRender::Objects::Cursor(cursorTex);
+            m_cursor->SetSize(64.0f, 64.0f);
+            m_cursor->SetPosition(0.0f, 0.0f);
+            m_cursor->SetOpacity(1.0f);
+        }
+
         return true;
     }
 
@@ -53,9 +67,14 @@ namespace Sunover {
         delete m_skyBox;
         m_skyBox = nullptr;
 
+        delete m_cursor;
+        m_cursor = nullptr;
+
         m_initialized = false;
     }
 
     bool RenderBridge::IsInitialized() const { return m_initialized; }
+
+    MeturmRender::Window& RenderBridge::GetWindow() { return *m_window; }
 
 } // namespace Sunover

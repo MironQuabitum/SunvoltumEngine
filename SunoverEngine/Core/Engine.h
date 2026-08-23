@@ -3,6 +3,7 @@
 #include "../LibSunover.h"
 #include "../Types/EngineMode.h"
 #include "../DataModel/DataModel.h"
+#include "../Physics/PhysicsBridge.h"
 
 #pragma warning(push)
 #pragma warning(disable: 4251)
@@ -26,6 +27,9 @@ namespace Sunover {
         /// Инициализация движка в указанном режиме
         void Init(EngineMode mode);
 
+        /// Физический тик — вызывать с фиксированным шагом (1/60 с)
+        void PhysicsTick(float fixedDelta);
+
         /// Основной тик — вызывать каждый кадр
         void Tick(float deltaTime);
 
@@ -37,6 +41,9 @@ namespace Sunover {
 
         /// Корень объектной иерархии
         DataModel DataModel;
+
+        /// Физический мост — доступен для прямого использования если нужно
+        PhysicsBridge Physics;
 
     private:
         EngineMode m_mode        = EngineMode::Standalone;

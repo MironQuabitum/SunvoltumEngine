@@ -9,7 +9,9 @@
 #include <MeturmRender/Objects/SunLight.h>
 #include <MeturmRender/Objects/SkyBox.h>
 #include <MeturmRender/Objects/MeshObject.h>
+#include <MeturmRender/Objects/Cursor.h>
 #include <MeturmRender/Interface/RenderTypes.h>
+#include <fstream>
 #include <MeturmRender/Types/CFrame.h>
 #include <MeturmRender/Types/Matrix3x3.h>
 #include <MeturmRender/Types/Mesh.h>

@@ -1,5 +1,7 @@
 #include "Runtime.h"
 #include "../Rendering/RenderBridge.h"
+#include "../Core/Engine.h"
+#include <MeturmRender/Core/Window.h>
 
 namespace Sunover {
 
@@ -12,10 +14,23 @@ namespace Sunover {
     void Runtime::SetRenderBridge(RenderBridge* bridge)
     {
         m_renderBridge = bridge;
+
+        // Подключаем Input источник из окна RenderBridge
+        if (bridge && bridge->IsInitialized())
+            Input.SetSource(&bridge->GetWindow().GetInput());
+    }
+
+    void Runtime::SetEngine(Engine* engine)
+    {
+        m_engine = engine;
     }
 
     void Runtime::Start()
     {
+        // Если SetRenderBridge вызван до Init окна — подключаем Input здесь
+        if (m_renderBridge && m_renderBridge->IsInitialized() && !Input.IsValid())
+            Input.SetSource(&m_renderBridge->GetWindow().GetInput());
+
         m_running = true;
         RunLoop();
     }
@@ -34,6 +49,9 @@ namespace Sunover {
         {
             if (m_renderBridge && m_renderBridge->IsInitialized())
             {
+                // Input::Update() — сбрасывает per-frame дельты до PollEvents
+                m_renderBridge->GetWindow().GetInput().Update();
+
                 if (!m_renderBridge->PollEvents())
                 {
                     m_running = false;
@@ -56,6 +74,8 @@ namespace Sunover {
             while (accumulator >= FIXED_TIMESTEP)
             {
                 if (PreSimulation)  PreSimulation(FIXED_TIMESTEP);
+                // Физический тик движка — между Pre и PostSimulation
+                if (m_engine) m_engine->PhysicsTick(FIXED_TIMESTEP);
                 if (PostSimulation) PostSimulation(FIXED_TIMESTEP);
                 accumulator -= FIXED_TIMESTEP;
             }

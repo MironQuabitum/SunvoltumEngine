@@ -35,6 +35,21 @@ namespace Sunover {
 
         SyncScene();
         m_renderer->RenderSunLight(*m_sunLight);
+
+        // Курсор — двигается за мышью когда не залочен
+        if (m_cursor)
+        {
+            auto& input = m_window->GetInput();
+            if (!input.IsMouseLocked())
+            {
+                m_cursor->SetPosition(
+                    static_cast<float>(input.GetMouseX()),
+                    static_cast<float>(input.GetMouseY())
+                );
+            }
+            m_renderer->RenderCursor(*m_cursor);
+        }
+
         m_renderer->EndFrame();
     }
 

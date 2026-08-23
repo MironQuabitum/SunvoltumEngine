@@ -15,6 +15,7 @@ namespace MeturmRender {
         class SunLight;
         class SkyBox;
         class MeshObject;
+        class Cursor;
     }
 }
 
@@ -51,6 +52,9 @@ namespace Sunover {
 
         bool IsInitialized() const;
 
+        // Доступ к окну — для Input
+        MeturmRender::Window& GetWindow();
+
     private:
         void SyncCamera();
         void SyncLighting();
@@ -65,6 +69,7 @@ namespace Sunover {
         std::unique_ptr<MeturmRender::Objects::SunLight> m_sunLight;
         // Сырой указатель — удаляется вручную в Shutdown() где SkyBox полностью определён
         MeturmRender::Objects::SkyBox*                   m_skyBox    = nullptr;
+        MeturmRender::Objects::Cursor*                   m_cursor    = nullptr;
 
         // Кэш мешей: ключ — адрес экземпляра Instance.
         // MeshObject хранится как persistent объект, GPU-буфер создаётся один раз.

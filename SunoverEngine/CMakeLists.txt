@@ -25,6 +25,12 @@ add_library(LibSunover SHARED
     "Runtime/Runtime.h"
     "Runtime/Runtime.cpp"
 
+    # Input
+    "Input/KeyCode.h"
+    "Input/MouseButton.h"
+    "Input/SunoverInput.h"
+    "Input/SunoverInput.cpp"
+
     # Rendering
     "Rendering/RenderBridge.h"
     "Rendering/Bridge/BridgeCommon.h"
@@ -63,6 +69,17 @@ add_library(LibSunover SHARED
     "Shapes/Block.h"
     "Shapes/Sphere.h"
     "Shapes/Cylinder.h"
+
+    # Physics
+    "Physics/PhysicsCommon.h"
+    "Physics/PhysicsManager.h"
+    "Physics/PhysicsManager.cpp"
+    "Physics/PhysicsWorld.h"
+    "Physics/PhysicsWorld.cpp"
+    "Physics/PhysicsBody.h"
+    "Physics/PhysicsBody.cpp"
+    "Physics/PhysicsBridge.h"
+    "Physics/PhysicsBridge.cpp"
 )
 
 set_target_properties(LibSunover PROPERTIES OUTPUT_NAME "LibSunover")
@@ -78,7 +95,8 @@ target_include_directories(LibSunover PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
 set(METURM_ROOT "C:/MediaWork/Meturm/Internal/MeturmRender")
 
 target_include_directories(LibSunover PRIVATE "${METURM_ROOT}")
-
+find_package(unofficial-omniverse-physx-sdk CONFIG REQUIRED)
+target_link_libraries(LibSunover PRIVATE unofficial::omniverse-physx-sdk::sdk)
 target_link_libraries(LibSunover PRIVATE
     "$<$<CONFIG:Debug>:${METURM_ROOT}/out/build/x64-Debug/MeturmRender/MeturmRender.lib>"
     "$<$<CONFIG:Debug>:${METURM_ROOT}/out/build/x64-Debug/MeturmFrame/MeturmFrame.lib>"

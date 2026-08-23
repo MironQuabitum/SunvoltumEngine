@@ -4,6 +4,7 @@
 #include <chrono>
 
 #include "../LibSunover.h"
+#include "../Input/SunoverInput.h"
 
 #pragma warning(push)
 #pragma warning(disable: 4251)
@@ -11,6 +12,7 @@
 namespace Sunover {
 
     class RenderBridge;
+    class Engine;
 
     class LibSunover Runtime
     {
@@ -22,8 +24,10 @@ namespace Sunover {
         Runtime& operator=(const Runtime&) = delete;
 
         // Подключить RenderBridge — вызывать до Start().
-        // Только для режимов Standalone и Client.
         void SetRenderBridge(RenderBridge* bridge);
+
+        // Подключить Engine для физического тика — вызывать до Start().
+        void SetEngine(Engine* engine);
 
         // Запустить игровой цикл. Блокирует поток до закрытия окна или Stop().
         void Start();
@@ -32,11 +36,15 @@ namespace Sunover {
         void Stop();
 
         // -----------------------------------------------------------
+        // Ввод — доступен в любом событии
+        // -----------------------------------------------------------
+        SunoverInput Input;
+
+        // -----------------------------------------------------------
         // События
         // -----------------------------------------------------------
 
         // Начало кадра. Каждый кадр, частота не ограничена.
-        // Вызывается ПОСЛЕ RenderBridge::Frame() — рендер уже выполнен.
         std::function<void(float deltaTime)> RenderStepped;
 
         // Перед симуляцией физики. Фиксированный тик 60/с.
@@ -51,6 +59,7 @@ namespace Sunover {
     private:
         bool          m_running      = false;
         RenderBridge* m_renderBridge = nullptr;
+        Engine*       m_engine       = nullptr;
 
         static constexpr float FIXED_TIMESTEP = 1.0f / 60.0f;
 
