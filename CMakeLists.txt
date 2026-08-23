@@ -10,7 +10,9 @@ if (POLICY CMP0141)
 endif()
 
 project ("SunoverEngine")
+find_package(OpenAL CONFIG REQUIRED)
+find_package(unofficial-omniverse-physx-sdk CONFIG REQUIRED)
+find_package(Vorbis CONFIG REQUIRED)
 
-# Включите подпроекты.
 add_subdirectory ("SunoverEngine")
 add_subdirectory ("SunoverClient")

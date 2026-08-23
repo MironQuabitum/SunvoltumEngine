@@ -4,6 +4,7 @@
 #include "../Types/EngineMode.h"
 #include "../DataModel/DataModel.h"
 #include "../Physics/PhysicsBridge.h"
+#include "../SoundEngine/SoundEngine.h"
 
 #pragma warning(push)
 #pragma warning(disable: 4251)
@@ -44,6 +45,9 @@ namespace Sunover {
 
         /// Физический мост — доступен для прямого использования если нужно
         PhysicsBridge Physics;
+
+        /// Звуковой движок — доступен для прямого использования если нужно
+        SoundEngine Sound;
 
     private:
         EngineMode m_mode        = EngineMode::Standalone;

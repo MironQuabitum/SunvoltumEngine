@@ -43,6 +43,13 @@ namespace Sunover {
     {
         if (!m_initialized) return;
 
+        // Инициализируем SoundEngine при первом тике —
+        // к этому моменту DataModel уже заполнен объектами из main().
+        if (!Sound.IsInitialized())
+            Sound.Init(*this);
+
+        Sound.Tick(deltaTime);
+
         // TODO: тик сетевого стека, Luau VM, игровых систем
     }
 
@@ -51,6 +58,7 @@ namespace Sunover {
         if (!m_initialized) return;
 
         Physics.Shutdown();
+        Sound.Shutdown();
 
         std::cout << "[SunoverEngine] Shutdown" << std::endl;
 

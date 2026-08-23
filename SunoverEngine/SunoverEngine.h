@@ -23,6 +23,7 @@
 #include "DataModel/InstanceClasses/Players.h"
 #include "DataModel/InstanceClasses/Decal.h"
 #include "DataModel/InstanceClasses/TextureSurface.h"
+#include "DataModel/InstanceClasses/Sound.h"
 #include "Input/KeyCode.h"
 #include "Input/MouseButton.h"
 #include "Input/SunoverInput.h"

@@ -19,6 +19,14 @@ int main()
     ws.SetProperty(Workspace::Gravity,        PropertyValue::Float(196.2f)); // 196.2 studs/s² = 9.81 m/s²
     ws.SetProperty(Workspace::PhysicsEnabled, PropertyValue::Bool(true), true);
 
+    // Ambient музыка в Workspace — слышна везде на карте
+    auto& soundAmbient = ws.AddInstance("AmbientMusic", Sound::ClassId);
+    Sound::Init(soundAmbient);
+    soundAmbient.SetProperty(Sound::SoundId,  PropertyValue::String("PlatformContent/sounds/betterofalone.ogg"));
+    soundAmbient.SetProperty(Sound::Volume,   PropertyValue::Float(0.35f));
+    soundAmbient.SetProperty(Sound::Looped,   PropertyValue::Bool(true));
+    soundAmbient.SetProperty(Sound::Playing,  PropertyValue::Bool(true));
+
     lighting.SetProperty(Lighting::Brightness,         PropertyValue::Number(2.0));
     lighting.SetProperty(Lighting::ClockTime,          PropertyValue::Number(14.0));
     lighting.SetProperty(Lighting::GeographicLatitude, PropertyValue::Number(45.0));
@@ -75,6 +83,14 @@ int main()
     decal1.SetProperty(Decal::Face,         PropertyValue::Int(4)); // Front
     decal1.SetProperty(Decal::Texture,      PropertyValue::String("PlatformContent/textures/EpicFace.dds"));
     decal1.SetProperty(Decal::Transparency, PropertyValue::Float(0.0f));
+
+    // Звук на Sphere1 — 3D источник (Parent = ShapePart)
+    auto& sound3d = sphere1.AddInstance("OofSound", Sound::ClassId);
+    Sound::Init(sound3d);
+    sound3d.SetProperty(Sound::SoundId,  PropertyValue::String("PlatformContent/sounds/oof.ogg"));
+    sound3d.SetProperty(Sound::Volume,   PropertyValue::Float(1.0f));
+    sound3d.SetProperty(Sound::Looped,   PropertyValue::Bool(true));
+    sound3d.SetProperty(Sound::Playing,  PropertyValue::Bool(true));
 
     // -----------------------------------------------------------------------
     // Сфера 2: Size 4x4x4, смещена по Z

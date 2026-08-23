@@ -58,6 +58,11 @@ add_library(LibSunover SHARED
     "DataModel/InstanceClasses/Players.h"
     "DataModel/InstanceClasses/Decal.h"
     "DataModel/InstanceClasses/TextureSurface.h"
+    "DataModel/InstanceClasses/Sound.h"
+
+    # SoundEngine
+    "SoundEngine/SoundEngine.h"
+    "SoundEngine/SoundEngine.cpp"
 
     # Formats
     "Formats/SMesh.h"
@@ -91,12 +96,15 @@ endif()
 target_compile_definitions(LibSunover PRIVATE SUNOVER_BUILD_DLL)
 target_include_directories(LibSunover PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
 
-# MeturmRender — линкуемся к уже собранным .lib
+
 set(METURM_ROOT "C:/MediaWork/Meturm/Internal/MeturmRender")
 
 target_include_directories(LibSunover PRIVATE "${METURM_ROOT}")
-find_package(unofficial-omniverse-physx-sdk CONFIG REQUIRED)
+target_link_libraries(LibSunover PRIVATE OpenAL::OpenAL)
 target_link_libraries(LibSunover PRIVATE unofficial::omniverse-physx-sdk::sdk)
+target_link_libraries(LibSunover PRIVATE Vorbis::vorbis Vorbis::vorbisfile)
+
+
 target_link_libraries(LibSunover PRIVATE
     "$<$<CONFIG:Debug>:${METURM_ROOT}/out/build/x64-Debug/MeturmRender/MeturmRender.lib>"
     "$<$<CONFIG:Debug>:${METURM_ROOT}/out/build/x64-Debug/MeturmFrame/MeturmFrame.lib>"
