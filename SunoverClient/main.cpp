@@ -22,7 +22,7 @@ int main()
     // Ambient музыка в Workspace — слышна везде на карте
     auto& soundAmbient = ws.AddInstance("AmbientMusic", Sound::ClassId);
     Sound::Init(soundAmbient);
-    soundAmbient.SetProperty(Sound::SoundId,  PropertyValue::String("PlatformContent/sounds/betterofalone.ogg"));
+    soundAmbient.SetProperty(Sound::SoundId,  PropertyValue::String("PlatformContent/sounds/betterofalone1.ogg"));
     soundAmbient.SetProperty(Sound::Volume,   PropertyValue::Float(0.35f));
     soundAmbient.SetProperty(Sound::Looped,   PropertyValue::Bool(true));
     soundAmbient.SetProperty(Sound::Playing,  PropertyValue::Bool(true));
@@ -156,8 +156,8 @@ int main()
     {
         auto& input = runtime.Input;
         rotTime += dt;
-		std::cout << "ClockTime : " << clocktime << std::endl;
-		clocktime += dt * 1.0f; // 10 секунд = 1 час
+		std::cout << "ClockTime: " << clocktime << std::endl;
+		clocktime += dt * 1.5f; // 10 секунд = 1 час
         lighting.SetProperty(Lighting::ClockTime, PropertyValue::Number(clocktime));
         if (input.IsKeyPressed(KeyCode::Escape))
             runtime.Stop();

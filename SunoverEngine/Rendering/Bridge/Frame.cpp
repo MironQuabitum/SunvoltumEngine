@@ -31,13 +31,12 @@ namespace Sunover {
 
         m_renderer->BeginFrame();
 
-        // Ночной скайбокс рендерится первым — он фоновый слой.
-        // Дневной рендерится поверх него и блендится через transparency.
-        if (m_skyBoxNight) m_renderer->RenderSkyBox(*m_skyBoxNight, *m_camera);
+        // Дневной скайбокс рендерится первым.
+        // Ночной рендерится поверх — когда его alpha=1 он перекрывает дневной.
         if (m_skyBox)      m_renderer->RenderSkyBox(*m_skyBox,      *m_camera);
+        if (m_skyBoxNight) m_renderer->RenderSkyBox(*m_skyBoxNight, *m_camera);
 
-        // Меш солнца рендерится до SyncScene — тени от объектов DataModel
-        // не затрагивают его (CastShadows=false выставлен при создании).
+        // Меш солнца рендерится после скайбоксов и до SyncScene.
         if (m_sunMesh) m_renderer->RenderObject(*m_sunMesh, *m_camera);
 
         SyncScene();
