@@ -1,4 +1,5 @@
 #include "BridgeCommon.h"
+#include <iostream>
 
 namespace Sunover {
 
@@ -46,12 +47,85 @@ namespace Sunover {
             m_cursor->SetOpacity(1.0f);
         }
 
+        // Меш солнца — плоский квад (billboard), лицом по -Z в локальном пространстве.
+        // Ориентация поворачивается к камере каждый кадр в SyncLighting.
+        // Не добавляется в DataModel, не участвует в физике, не отбрасывает тени.
+        {
+            // Единичный квад в плоскости XY, центр в (0,0,0), нормаль смотрит по -Z
+            // чтобы лицевая сторона Decal была видна со стороны камеры.
+            //
+            //  (-0.5, +0.5, 0)  ---  (+0.5, +0.5, 0)
+            //        |                      |
+            //  (-0.5, -0.5, 0)  ---  (+0.5, -0.5, 0)
+            //
+            const Sunover::Color3 white = { 1.0f, 0.98f, 0.7f };
+            const Sunover::Vector3 normFront = { 0.0f, 0.0f,  1.0f }; // +Z = Front для DecalFace
+            const Sunover::Vector3 normBack  = { 0.0f, 0.0f, -1.0f }; // обратная сторона
+
+            std::vector<Sunover::Vertex> verts = {
+                // лицевая сторона (нормаль +Z)
+                { { -0.5f,  0.5f, 0.0f }, normFront, { 0.0f, 0.0f }, white },
+                { {  0.5f,  0.5f, 0.0f }, normFront, { 1.0f, 0.0f }, white },
+                { {  0.5f, -0.5f, 0.0f }, normFront, { 1.0f, 1.0f }, white },
+                { { -0.5f, -0.5f, 0.0f }, normFront, { 0.0f, 1.0f }, white },
+                // обратная сторона (нормаль -Z) — отдельные вершины для правильного dot в декали
+                { { -0.5f,  0.5f, 0.0f }, normBack, { 0.0f, 0.0f }, white },
+                { {  0.5f,  0.5f, 0.0f }, normBack, { 1.0f, 0.0f }, white },
+                { {  0.5f, -0.5f, 0.0f }, normBack, { 1.0f, 1.0f }, white },
+                { { -0.5f, -0.5f, 0.0f }, normBack, { 0.0f, 1.0f }, white },
+            };
+            std::vector<uint32_t> idx = {
+                0, 1, 2,  0, 2, 3,  // лицевая
+                4, 6, 5,  4, 7, 6   // обратная (winding перевёрнут)
+            };
+
+            Sunover::Mesh quadMesh(verts, idx);
+            auto renderMesh = ToRenderMesh(quadMesh);
+            m_sunMesh = std::make_unique<MeturmRender::Objects::MeshObject>(
+                std::move(renderMesh));
+            m_sunMesh->SetCastShadows(false);
+            // Меш полностью прозрачный — вся картинка идёт через декаль.
+            // OGLRenderer при opacity=0 пропускает геометрию но рисует декали.
+            m_sunMesh->SetTransparency(1.0f);
+
+            // Декаль солнца из PlatformContent
+            {
+                std::ifstream sunTexStream(
+                    "PlatformContent/textures/sky/sun.png", std::ios::binary);
+                if (sunTexStream.is_open())
+                {
+                    std::cout << "[SunMesh] sun.png stream opened OK" << std::endl;
+                    auto sunTex = std::make_unique<MeturmRender::Texture>();
+                    bool loaded = sunTex->LoadTexture(MeturmRender::RenderType::OpenGL, sunTexStream);
+                    std::cout << "[SunMesh] Texture loaded: " << loaded
+                              << " IsLoaded: " << sunTex->IsLoaded() << std::endl;
+
+                    if (sunTex->IsLoaded())
+                    {
+                        MeturmRender::Decal sunDecal(*sunTex,
+                            MeturmRender::Enum::DecalFace::Back);
+                        sunDecal.SetIgnoreLighting(true);
+                        m_sunMesh->AddDecal(sunDecal);
+                        std::cout << "[SunMesh] Decal added, decal count: "
+                                  << m_sunMesh->GetDecals().size() << std::endl;
+                    }
+                }
+                else
+                {
+                    std::cout << "[SunMesh] ERROR: failed to open sun.png" << std::endl;
+                }
+            }
+        }
+
         return true;
     }
 
     void RenderBridge::Shutdown()
     {
         if (!m_initialized) return;
+
+        // Уничтожаем меш солнца до Shutdown() рендерера
+        m_sunMesh.reset();
 
         // Уничтожаем кэш мешей до Shutdown() рендерера —
         // MeshObject должен освободить GPU-буферы пока контекст ещё жив.
@@ -67,6 +141,9 @@ namespace Sunover {
         delete m_skyBox;
         m_skyBox = nullptr;
 
+        delete m_skyBoxNight;
+        m_skyBoxNight = nullptr;
+
         delete m_cursor;
         m_cursor = nullptr;
 
@@ -76,5 +153,12 @@ namespace Sunover {
     bool RenderBridge::IsInitialized() const { return m_initialized; }
 
     MeturmRender::Window& RenderBridge::GetWindow() { return *m_window; }
+
+    DataModel* RenderBridge::GetDataModel() const { return m_dataModel; }
+
+    void RenderBridge::SetCursorPosition(float x, float y)
+    {
+        if (m_cursor) m_cursor->SetPosition(x, y);
+    }
 
 } // namespace Sunover

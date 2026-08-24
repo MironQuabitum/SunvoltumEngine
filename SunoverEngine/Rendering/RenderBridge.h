@@ -55,6 +55,12 @@ namespace Sunover {
         // Доступ к окну — для Input
         MeturmRender::Window& GetWindow();
 
+        // Доступ к DataModel — для Runtime (Follow-камера и др. системы)
+        DataModel* GetDataModel() const;
+
+        // Выставить позицию курсора движка напрямую (работает даже при залоченной мыши)
+        void SetCursorPosition(float x, float y);
+
     private:
         void SyncCamera();
         void SyncLighting();
@@ -68,8 +74,13 @@ namespace Sunover {
         std::unique_ptr<MeturmRender::Objects::Camera>   m_camera;
         std::unique_ptr<MeturmRender::Objects::SunLight> m_sunLight;
         // Сырой указатель — удаляется вручную в Shutdown() где SkyBox полностью определён
-        MeturmRender::Objects::SkyBox*                   m_skyBox    = nullptr;
+        MeturmRender::Objects::SkyBox*                   m_skyBox      = nullptr;
+        // Ночной скайбокс — одна текстура на все 6 граней, блендится поверх дневного
+        MeturmRender::Objects::SkyBox*                   m_skyBoxNight = nullptr;
         MeturmRender::Objects::Cursor*                   m_cursor    = nullptr;
+
+        // Меш солнца — render-only объект, не участвует в DataModel/физике.
+        std::unique_ptr<MeturmRender::Objects::MeshObject> m_sunMesh;
 
         // Кэш мешей: ключ — адрес экземпляра Instance.
         // MeshObject хранится как persistent объект, GPU-буфер создаётся один раз.

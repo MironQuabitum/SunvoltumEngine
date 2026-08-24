@@ -12,6 +12,8 @@
 
 namespace Sunover {
 
+    class Instance; // forward declaration — Instance* хранится в InstanceRef
+
     enum class PropertyType : uint8_t
     {
         Bool,
@@ -24,7 +26,8 @@ namespace Sunover {
         CFrame,
         CameraType,
         Shape,
-        String,     // std::string — хранится в поле StringValue, а не в union
+        String,       // std::string — хранится в поле StringValue, а не в union
+        InstanceRef,  // Instance* — слабый указатель (не владеет)
     };
 
     struct PropertyValue
@@ -43,6 +46,7 @@ namespace Sunover {
             Sunover::CFrame      AsCFrame;
             Sunover::CameraType  AsCameraType;
             Sunover::Shape       AsShape;
+            Instance*            AsInstanceRef; // слабый указатель, не владеет
 
             Data() : AsInt(0) {}
             ~Data() {}
@@ -97,6 +101,10 @@ namespace Sunover {
         static PropertyValue String(const std::string& v)
         {
             PropertyValue p; p.Type = PropertyType::String; p.StringValue = v; return p;
+        }
+        static PropertyValue Ref(Instance* v)
+        {
+            PropertyValue p; p.Type = PropertyType::InstanceRef; p.Value.AsInstanceRef = v; return p;
         }
     };
 

@@ -21,7 +21,17 @@ namespace Classes {
         static constexpr PropertyId FieldOfView  = 2; // Number
 
         // Режим поведения камеры
-        static constexpr PropertyId CameraMode   = 3; // CameraType
+        static constexpr PropertyId CameraMode    = 3; // CameraType
+
+        // Объект, вокруг которого вращается орбитальная (Follow) камера.
+        // Тип PropertyType::InstanceRef — слабый указатель на Instance, не владеет.
+        static constexpr PropertyId CameraSubject  = 4; // InstanceRef (Instance*)
+
+        // Минимальное расстояние зума (радиус орбиты). 0 = first-person.
+        static constexpr PropertyId MinZoomDistance = 5; // Number
+
+        // Максимальное расстояние зума (радиус орбиты).
+        static constexpr PropertyId MaxZoomDistance = 6; // Number
     };
 
 } // namespace Classes

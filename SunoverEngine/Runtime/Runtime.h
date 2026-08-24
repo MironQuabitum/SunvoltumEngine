@@ -61,6 +61,33 @@ namespace Sunover {
         RenderBridge* m_renderBridge = nullptr;
         Engine*       m_engine       = nullptr;
 
+        // -----------------------------------------------------------
+        // Follow-камера — внутреннее состояние орбиты
+        // -----------------------------------------------------------
+        float m_followYaw    =  0.0f;   // горизонтальный угол орбиты (рад)
+        float m_followPitch  =  0.3f;   // вертикальный угол орбиты (рад)
+        float m_followRadius = 15.0f;   // текущее расстояние от субъекта (стадов)
+
+        // Позиция курсора движка в момент нажатия ПКМ (до лока).
+        // При отпускании ПКМ системный курсор телепортируется сюда.
+        int m_preLockMouseX = 0;
+        int m_preLockMouseY = 0;
+
+        // true пока движок удерживает лок мыши из-за first-person режима (radius == 0).
+        // Нужно чтобы при выходе из first-person корректно снять именно этот лок.
+        bool m_firstPersonLocked = false;
+
+        static constexpr float FOLLOW_SENS        = 0.002618f; // 0.15 deg/px в рад
+        static constexpr float FOLLOW_PITCH_MIN   = -1.48f;    // ~-85°
+        static constexpr float FOLLOW_PITCH_MAX   =  1.48f;    // ~+85°
+        static constexpr float FOLLOW_WHEEL_SPEED =  2.0f;     // стадов на клик колёса
+        // Fallback-пределы зума если в камере не выставлены Min/MaxZoomDistance
+        static constexpr float FOLLOW_RADIUS_MIN_DEFAULT =  0.0f;
+        static constexpr float FOLLOW_RADIUS_MAX_DEFAULT = 60.0f;
+
+        // Обновляет CFrame камеры если она в режиме Follow
+        void UpdateFollowCamera();
+
         static constexpr float FIXED_TIMESTEP = 1.0f / 60.0f;
 
         void RunLoop();

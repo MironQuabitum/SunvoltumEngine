@@ -32,9 +32,11 @@ int main()
     lighting.SetProperty(Lighting::GeographicLatitude, PropertyValue::Number(45.0));
     lighting.SetProperty(Lighting::UseDefaultSky,      PropertyValue::Bool(true));
 
-    camera.SetProperty(CurrentCamera::FieldOfView, PropertyValue::Number(60.0));
-    camera.SetProperty(CurrentCamera::CameraMode,  PropertyValue::CameraType(CameraType::Scriptable));
-    camera.SetProperty(CurrentCamera::CFrame,      PropertyValue::CFrame(
+    camera.SetProperty(CurrentCamera::FieldOfView,    PropertyValue::Number(60.0));
+    camera.SetProperty(CurrentCamera::CameraMode,     PropertyValue::CameraType(CameraType::Follow));
+    camera.SetProperty(CurrentCamera::MinZoomDistance, PropertyValue::Number(0.0));
+    camera.SetProperty(CurrentCamera::MaxZoomDistance, PropertyValue::Number(50.0));
+    camera.SetProperty(CurrentCamera::CFrame,         PropertyValue::CFrame(
         Sunover::CFrame::FromPosition(5.0f, 3.0f, -20.0f)
     ));
 
@@ -78,6 +80,9 @@ int main()
     sphere1.SetProperty(ShapePart::PosVelocity,  PropertyValue::Vector3({0.0f, 0.0f, 0.0f}));
     sphere1.SetProperty(ShapePart::RotVelocity,  PropertyValue::Vector3({0.0f, 0.0f, 0.0f}));
 
+    // Камера следит за Sphere1 в орбитальном режиме
+
+
     // EpicFace на Front грани
     auto& decal1 = sphere1.AddInstance("EpicFace_Front", Decal::ClassId);
     decal1.SetProperty(Decal::Face,         PropertyValue::Int(4)); // Front
@@ -107,11 +112,11 @@ int main()
     sphere2.SetProperty(ShapePart::CanCollide,   PropertyValue::Bool(true));
     sphere2.SetProperty(ShapePart::PosVelocity,  PropertyValue::Vector3({0.0f, 0.0f, 0.0f}));
     sphere2.SetProperty(ShapePart::RotVelocity,  PropertyValue::Vector3({0.0f, 0.0f, 0.0f}));
-
+    camera.SetProperty(CurrentCamera::CameraSubject, PropertyValue::Ref(&sphere1));
     // EpicFace на Back грани
     auto& decal2 = sphere2.AddInstance("EpicFace_Back", Decal::ClassId);
     decal2.SetProperty(Decal::Face,         PropertyValue::Int(5)); // Back
-    decal2.SetProperty(Decal::Texture,      PropertyValue::String("PlatformContent/textures/EpicFace.dds"));
+    decal2.SetProperty(Decal::Texture,      PropertyValue::String("PlatformContent/textures/face.png"));
     decal2.SetProperty(Decal::Transparency, PropertyValue::Float(0.0f));
 
     // -----------------------------------------------------------------------
@@ -143,26 +148,17 @@ int main()
     runtime.SetEngine(&engine);
     runtime.Input.SetCursorVisible(false);
 
-    float camYaw   = 0.0f;
-    float camPitch = 0.0f;
-    float camX     = 5.0f;
-    float camY     = 3.0f;
-    float camZ     = -20.0f;
-    float rotTime  = 0.0f;
-
+    // Follow-камера: движок сам крутит орбиту по ПКМ + мышь.
+    // В RenderStepped — только WASD-управление субъектом (sphere1) и служебные кнопки.
+    float rotTime = 0.0f;
+	float clocktime = 14.0f;
     runtime.RenderStepped = [&](float dt)
     {
         auto& input = runtime.Input;
         rotTime += dt;
-
-        if (input.IsMousePressed(MouseButton::Right))
-        {
-            input.SetMouseLocked(true);
-            input.ResetMouseDelta();
-        }
-        if (input.IsMouseReleased(MouseButton::Right))
-            input.SetMouseLocked(false);
-
+		std::cout << "ClockTime : " << clocktime << std::endl;
+		clocktime += dt * 1.0f; // 10 секунд = 1 час
+        lighting.SetProperty(Lighting::ClockTime, PropertyValue::Number(clocktime));
         if (input.IsKeyPressed(KeyCode::Escape))
             runtime.Stop();
 
@@ -173,51 +169,42 @@ int main()
             ShapePart::ApplyRotationImpulse(sphere2, Vector3(0.0f,  20.0f,   0.0f));
         }
 
-        if (input.IsMouseLocked())
+        // WASD — перемещаем субъект (sphere1) в горизонтальной плоскости.
+        // Направление движения не зависит от камеры: W = -Z, S = +Z, A = -X, D = +X.
         {
-            const float SENS  = 0.002618f; // 0.15 deg/px в радианах
-            const float LIMIT = 1.5533f;   // ~89 градусов
-
-            camYaw   += static_cast<float>(input.GetMouseDeltaX()) * SENS;
-            camPitch += static_cast<float>(input.GetMouseDeltaY()) * SENS;
-            if (camPitch >  LIMIT) camPitch =  LIMIT;
-            if (camPitch < -LIMIT) camPitch = -LIMIT;
-            input.ResetMouseDelta();
-
-            float speed = 10.0f * dt;
+            float speed = 8.0f * dt;
             if (input.IsKeyDown(KeyCode::LeftShift)) speed *= 3.0f;
 
-            Matrix3x3 rot     = Matrix3x3::FromEuler(camPitch, camYaw, 0.0f);
-            Vector3   forward = rot * Vector3(0.0f, 0.0f, 1.0f);
-            Vector3   right   = rot * Vector3(1.0f, 0.0f, 0.0f);
+            auto* cfProp = sphere1.GetProperty(ShapePart::CFrame);
+            if (cfProp && cfProp->Type == PropertyType::CFrame)
+            {
+                Sunover::CFrame cf = cfProp->Value.AsCFrame;
 
-            if (input.IsKeyDown(KeyCode::W)) { camX += forward.X*speed; camY += forward.Y*speed; camZ += forward.Z*speed; }
-            if (input.IsKeyDown(KeyCode::S)) { camX -= forward.X*speed; camY -= forward.Y*speed; camZ -= forward.Z*speed; }
-            if (input.IsKeyDown(KeyCode::D)) { camX += right.X*speed;   camZ += right.Z*speed; }
-            if (input.IsKeyDown(KeyCode::A)) { camX -= right.X*speed;   camZ -= right.Z*speed; }
-            if (input.IsKeyDown(KeyCode::Space)) {
-                auto* s1vel = sphere1.GetProperty(ShapePart::PosVelocity);
-                auto* s1rot = sphere1.GetProperty(ShapePart::RotVelocity);
-                auto* s2vel = sphere2.GetProperty(ShapePart::PosVelocity);
-                auto* s2rot = sphere2.GetProperty(ShapePart::RotVelocity);
-                std::cout << "Velocities:"
-                    << " Sphere1 pos=" << (s1vel ? s1vel->Value.AsVector3 : Sunover::Vector3{})
-                    << " rot="         << (s1rot ? s1rot->Value.AsVector3 : Sunover::Vector3{})
-                    << " | Sphere2 pos=" << (s2vel ? s2vel->Value.AsVector3 : Sunover::Vector3{})
-                    << " rot="           << (s2rot ? s2rot->Value.AsVector3 : Sunover::Vector3{})
-                    << std::endl;
+                if (input.IsKeyDown(KeyCode::W)) cf.Position.Z += speed;
+                if (input.IsKeyDown(KeyCode::S)) cf.Position.Z -= speed;
+                if (input.IsKeyDown(KeyCode::D)) cf.Position.X += speed;
+                if (input.IsKeyDown(KeyCode::A)) cf.Position.X -= speed;
+                if (input.IsKeyDown(KeyCode::E)) cf.Position.Y += speed;
+                if (input.IsKeyDown(KeyCode::Q)) cf.Position.Y -= speed;
+
+                sphere1.SetProperty(ShapePart::CFrame, PropertyValue::CFrame(cf));
             }
-            if (input.IsKeyDown(KeyCode::E)) camY += speed;
-            if (input.IsKeyDown(KeyCode::Q)) camY -= speed;
-
-            camera.SetProperty(Classes::CurrentCamera::CFrame, PropertyValue::CFrame(
-                Sunover::CFrame(Vector3(camX, camY, camZ),
-                                Matrix3x3::FromEuler(camPitch, camYaw, 0.0f))
-            ));
         }
 
-        // Вращение сфер: 45 deg/sec = 0.7854 рад/сек
-
+        // Space — отладочный вывод скоростей сфер
+        if (input.IsKeyDown(KeyCode::Space))
+        {
+            auto* s1vel = sphere1.GetProperty(ShapePart::PosVelocity);
+            auto* s1rot = sphere1.GetProperty(ShapePart::RotVelocity);
+            auto* s2vel = sphere2.GetProperty(ShapePart::PosVelocity);
+            auto* s2rot = sphere2.GetProperty(ShapePart::RotVelocity);
+            std::cout << "Velocities:"
+                << " Sphere1 pos=" << (s1vel ? s1vel->Value.AsVector3 : Sunover::Vector3{})
+                << " rot="         << (s1rot ? s1rot->Value.AsVector3 : Sunover::Vector3{})
+                << " | Sphere2 pos=" << (s2vel ? s2vel->Value.AsVector3 : Sunover::Vector3{})
+                << " rot="           << (s2rot ? s2rot->Value.AsVector3 : Sunover::Vector3{})
+                << std::endl;
+        }
     };
 
     runtime.Heartbeat = [&engine](float dt)
