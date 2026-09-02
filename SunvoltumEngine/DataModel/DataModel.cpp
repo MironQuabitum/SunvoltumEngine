@@ -24,6 +24,20 @@ namespace Sunvoltum {
         return nullptr;
     }
 
+    bool DataModel::RemoveChild(Instance* child)
+    {
+        for (auto it = m_instances.begin(); it != m_instances.end(); ++it)
+        {
+            if (it->get() == child)
+            {
+                FireChildRemoved(*child);
+                m_instances.erase(it);
+                return true;
+            }
+        }
+        return false;
+    }
+
     const std::vector<std::unique_ptr<Instance>>& DataModel::GetChildren() const
     {
         return m_instances;

@@ -4,45 +4,44 @@
 #include "LibSunvoltumRender.h"
 #include "KeyCode.h"
 #include "MouseButton.h"
+#include "../Runtime/IInputSource.h"
 
 // MeturmFrame::Input скрыт — клиент не тянет MeturmFrame заголовки
 namespace MeturmFrame { class Input; }
 
 namespace Sunvoltum {
 
-    class LibSunvoltumRender SunvoltumInput
+    class LibSunvoltumRender SunvoltumInput : public IInputSource
     {
     public:
         SunvoltumInput() = default;
 
-        // Вызывается из Runtime — устанавливает источник ввода из RenderBridge
+        // Вызывается из RenderBridge — устанавливает источник ввода
         void SetSource(MeturmFrame::Input* input);
 
         bool IsValid() const;
 
-        // --- Клавиатура ---
-        bool IsKeyDown    (KeyCode key) const;
-        bool IsKeyPressed (KeyCode key) const;
-        bool IsKeyReleased(KeyCode key) const;
+        // IInputSource
+        bool IsKeyDown    (KeyCode key)     const override;
+        bool IsKeyPressed (KeyCode key)     const override;
+        bool IsKeyReleased(KeyCode key)     const override;
 
-        // --- Мышь ---
-        bool IsMouseDown    (MouseButton btn) const;
-        bool IsMousePressed (MouseButton btn) const;
-        bool IsMouseReleased(MouseButton btn) const;
+        bool IsMouseDown    (MouseButton btn) const override;
+        bool IsMousePressed (MouseButton btn) const override;
+        bool IsMouseReleased(MouseButton btn) const override;
 
-        int GetMouseX()      const;
-        int GetMouseY()      const;
-        int GetMouseDeltaX() const;
-        int GetMouseDeltaY() const;
-        int GetMouseWheel()  const;
+        int  GetMouseX()      const override;
+        int  GetMouseY()      const override;
+        int  GetMouseDeltaX() const override;
+        int  GetMouseDeltaY() const override;
+        int  GetMouseWheel()  const override;
 
-        void SetCursorVisible(bool visible);
-        bool IsCursorVisible() const;
-
-        void SetMouseLocked(bool locked);
-        bool IsMouseLocked()   const;
-        void ResetMouseDelta();
-        void SetMousePosition(int x, int y);
+        void SetCursorVisible(bool visible)  override;
+        bool IsCursorVisible()         const override;
+        void SetMouseLocked(bool locked)     override;
+        bool IsMouseLocked()           const override;
+        void ResetMouseDelta()               override;
+        void SetMousePosition(int x, int y)  override;
 
     private:
         MeturmFrame::Input* m_source = nullptr;

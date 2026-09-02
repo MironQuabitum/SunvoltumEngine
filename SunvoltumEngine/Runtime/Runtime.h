@@ -2,42 +2,44 @@
 
 #include <functional>
 #include <chrono>
-#include <vector>
 
 #include "../LibSunvoltum.h"
-#include "LibSunvoltumRender.h"
-#include "../Input/SunvoltumInput.h"
 #include "../DataModel/PropertyManager.h"
+#include "../Types/CameraType.h"
+#include "IRenderBridge.h"
+#include "IInputSource.h"
 
 #pragma warning(push)
 #pragma warning(disable: 4251)
 
 namespace Sunvoltum {
 
-    class RenderBridge;
     class Engine;
     class Instance;
 
-    class LibSunvoltumRender Runtime
+    class LibSunvoltum Runtime
     {
     public:
         Runtime();
-        ~Runtime() = default;
+        ~Runtime();
 
         Runtime(const Runtime&)            = delete;
         Runtime& operator=(const Runtime&) = delete;
 
-        void SetRenderBridge(RenderBridge* bridge);
+        // Передать рендер-бридж (необязательно — сервер не вызывает)
+        void SetRenderBridge(IRenderBridge* bridge);
+
+        // Передать источник ввода (необязательно — сервер не вызывает)
+        void SetInputSource(IInputSource* input);
+
         void SetEngine(Engine* engine);
 
         void Start();
         void Stop();
 
-        float GetCameraYaw()  const { return m_followYaw;          }
-        float GetCameraZoom() const { return m_followRadius;        }
-        bool  IsFirstPerson() const { return m_firstPersonLocked;   }
-
-        SunvoltumInput Input;
+        float GetCameraYaw()  const { return m_followYaw;        }
+        float GetCameraZoom() const { return m_followRadius;      }
+        bool  IsFirstPerson() const { return m_firstPersonLocked; }
 
         std::function<void(float deltaTime)>  RenderStepped;
         std::function<void(float fixedDelta)> PreSimulation;
@@ -45,12 +47,13 @@ namespace Sunvoltum {
         std::function<void(float deltaTime)>  Heartbeat;
 
     private:
-        bool          m_running      = false;
-        RenderBridge* m_renderBridge = nullptr;
-        Engine*       m_engine       = nullptr;
+        bool           m_running      = false;
+        IRenderBridge* m_renderBridge = nullptr;
+        IInputSource*  m_input        = nullptr;
+        Engine*        m_engine       = nullptr;
 
         // -----------------------------------------------------------
-        // Follow-камера — орбитальное состояние
+        // Follow-камера
         // -----------------------------------------------------------
         float m_followYaw    =  0.0f;
         float m_followPitch  =  0.3f;
@@ -68,24 +71,21 @@ namespace Sunvoltum {
         static constexpr float FOLLOW_RADIUS_MAX_DEFAULT = 60.0f;
 
         // -----------------------------------------------------------
-        // Кэш Follow-камеры — обновляется через PropertyManager
+        // Кэш Follow-камеры
         // -----------------------------------------------------------
-        Instance*   m_camInst    = nullptr;  // CurrentCamera Instance
-        Instance*   m_subject    = nullptr;  // CameraSubject Instance
+        Instance*  m_camInst    = nullptr;
+        Instance*  m_subject    = nullptr;
 
-        CameraType  m_cameraMode = CameraType::Follow;
-        float       m_radiusMin  = FOLLOW_RADIUS_MIN_DEFAULT;
-        float       m_radiusMax  = FOLLOW_RADIUS_MAX_DEFAULT;
+        CameraType m_cameraMode = CameraType::Follow;
+        float      m_radiusMin  = FOLLOW_RADIUS_MIN_DEFAULT;
+        float      m_radiusMax  = FOLLOW_RADIUS_MAX_DEFAULT;
 
-        // Токены подписок Follow-камеры
         PropertyToken m_camModeToken;
         PropertyToken m_camSubjectToken;
         PropertyToken m_camMinZoomToken;
         PropertyToken m_camMaxZoomToken;
 
-        // Вызывается из Start() — находит камеру в DataModel и подписывается
         void InitFollowCamera();
-
         void UpdateFollowCamera();
 
         static constexpr float FIXED_TIMESTEP = 1.0f / 240.0f;

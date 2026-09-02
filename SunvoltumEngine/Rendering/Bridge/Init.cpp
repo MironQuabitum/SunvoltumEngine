@@ -31,6 +31,9 @@ namespace Sunvoltum {
 
         m_initialized = true;
 
+        // Подключаем внутренний объект ввода к окну
+        SetInputSource(m_inputObj);
+
         InitSkyBox();
 
         // Курсор — загружаем текстуру из PlatformContent

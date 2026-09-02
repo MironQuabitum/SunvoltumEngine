@@ -22,7 +22,8 @@ add_library(LibSunvoltum SHARED
     "Core/Engine.cpp"
 
     # Runtime
-    # Runtime.h и Runtime.cpp компилируются в LibSunvoltumRender (зависят от RenderBridge)
+    "Runtime/Runtime.h"
+    "Runtime/Runtime.cpp"
 
     # Input
     "Input/KeyCode.h"
@@ -44,6 +45,8 @@ add_library(LibSunvoltum SHARED
     "DataModel/Instance.cpp"
     "DataModel/PropertyManager.h"
     "DataModel/PropertyManager.cpp"
+    "DataModel/InstanceRegistry.h"
+    "DataModel/InstanceRegistry.cpp"
 
     # InstanceClasses
     "DataModel/InstanceClasses/Workspace.h"
@@ -51,6 +54,7 @@ add_library(LibSunvoltum SHARED
     "DataModel/InstanceClasses/ShapePart.h"
     "DataModel/InstanceClasses/Lighting.h"
     "DataModel/InstanceClasses/Players.h"
+    "DataModel/InstanceClasses/Player.h"
     "DataModel/InstanceClasses/Decal.h"
     "DataModel/InstanceClasses/TextureSurface.h"
     "DataModel/InstanceClasses/Sound.h"
@@ -96,6 +100,25 @@ add_library(LibSunvoltum SHARED
     "Shapes/Sphere.h"
     "Shapes/Cylinder.h"
 
+    # Network
+    "Network/NetworkPacket.h"
+    "Network/NetworkManager.h"
+    "Network/NetworkManager.cpp"
+    "Network/NetworkServer.h"
+    "Network/NetworkServer.cpp"
+    "Network/NetworkClient.h"
+    "Network/NetworkClient.cpp"
+    "Network/NetworkSerializer.h"
+    "Network/NetworkSerializer.cpp"
+    "Network/SceneSerializer.h"
+    "Network/SceneSerializer.cpp"
+    "Network/SceneDeserializer.h"
+    "Network/SceneDeserializer.cpp"
+    "Network/ServerReplicator.h"
+    "Network/ServerReplicator.cpp"
+    "Network/ClientReplicator.h"
+    "Network/ClientReplicator.cpp"
+
     # Physics
     "Physics/PhysicsCommon.h"
     "Physics/PhysicsManager.h"
@@ -123,3 +146,4 @@ target_link_libraries(LibSunvoltum PRIVATE OpenAL::OpenAL)
 target_link_libraries(LibSunvoltum PRIVATE unofficial::omniverse-physx-sdk::sdk)
 target_link_libraries(LibSunvoltum PRIVATE Vorbis::vorbis Vorbis::vorbisfile)
 target_link_libraries(LibSunvoltum PRIVATE unofficial::luau::Luau.Compiler unofficial::luau::Luau.VM)
+target_link_libraries(LibSunvoltum PRIVATE $<IF:$<TARGET_EXISTS:libuv::uv_a>,libuv::uv_a,libuv::uv>)

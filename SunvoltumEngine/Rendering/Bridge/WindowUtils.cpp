@@ -25,4 +25,9 @@ namespace Sunvoltum {
             target.SetSource(&m_window->GetInput());
     }
 
+    SunvoltumInput& RenderBridge::GetInput()
+    {
+        return m_inputObj;
+    }
+
 } // namespace Sunvoltum

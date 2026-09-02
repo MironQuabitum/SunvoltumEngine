@@ -18,10 +18,6 @@ add_library(LibSunvoltumRender SHARED
 
     # SunvoltumInput — адаптер поверх MeturmFrame, компилируется здесь
     "../SunvoltumEngine/Input/SunvoltumInput.cpp"
-
-    # Runtime — игровой цикл, зависит от RenderBridge и SunvoltumInput
-    "../SunvoltumEngine/Runtime/Runtime.h"
-    "../SunvoltumEngine/Runtime/Runtime.cpp"
 )
 
 set_target_properties(LibSunvoltumRender PROPERTIES OUTPUT_NAME "LibSunvoltumRender")

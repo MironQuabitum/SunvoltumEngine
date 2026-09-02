@@ -19,6 +19,9 @@ namespace Sunvoltum {
     InstanceParent* Instance::GetParent() const     { return m_parent; }
     void Instance::SetParent(InstanceParent* p)     { m_parent = p;    }
 
+    InstanceNetId Instance::GetNetId() const        { return m_netId; }
+    void          Instance::SetNetId(InstanceNetId id) { m_netId = id; }
+
     Instance& Instance::AddInstance(const std::string& name, ClassId classId)
     {
         m_children.push_back(std::make_unique<Instance>(name, classId, this));
@@ -37,6 +40,20 @@ namespace Sunvoltum {
     const std::vector<std::unique_ptr<Instance>>& Instance::GetChildren() const
     {
         return m_children;
+    }
+
+    bool Instance::RemoveChild(Instance* child)
+    {
+        for (auto it = m_children.begin(); it != m_children.end(); ++it)
+        {
+            if (it->get() == child)
+            {
+                FireChildRemoved(*child);
+                m_children.erase(it);
+                return true;
+            }
+        }
+        return false;
     }
 
     void Instance::SetProperty(PropertyId id, const PropertyValue& value,
@@ -66,6 +83,11 @@ namespace Sunvoltum {
     {
         auto* entry = GetPropertyEntry(id);
         return entry ? entry->ReadOnly : false;
+    }
+
+    const std::unordered_map<PropertyId, PropertyEntry>& Instance::GetProperties() const
+    {
+        return m_properties;
     }
 
 } // namespace Sunvoltum

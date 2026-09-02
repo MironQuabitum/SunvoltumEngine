@@ -11,6 +11,8 @@
 #include "../DataModel/PropertyManager.h"
 #include "../Types/CFrame.h"
 #include "../Types/Vector3.h"
+#include "../Runtime/IRenderBridge.h"
+#include "../Input/SunvoltumInput.h"
 
 namespace MeturmRender {
     class Renderer;
@@ -33,7 +35,6 @@ namespace Sunvoltum {
     class Engine;
     class DataModel;
     class Instance;
-    class SunvoltumInput;
 
     // -------------------------------------------------------------------------
     // SceneEntry — данные одного ShapePart в рендер-сцене.
@@ -59,7 +60,7 @@ namespace Sunvoltum {
         PropertyToken tokenAnchored;
     };
 
-    class LibSunvoltumRender RenderBridge
+    class LibSunvoltumRender RenderBridge : public IRenderBridge
     {
     public:
         RenderBridge();
@@ -72,19 +73,22 @@ namespace Sunvoltum {
                   const char* title = "Sunvoltum");
 
         void Shutdown();
-        void Frame(float deltaTime);
-        bool PollEvents();
-        bool IsInitialized() const;
+
+        // IRenderBridge
+        bool       IsInitialized()   const override;
+        void       UpdateInput()           override;
+        bool       PollEvents()            override;
+        void       Frame(float deltaTime)  override;
+        DataModel* GetDataModel()    const override;
+        int        GetWindowWidth()  const override;
+        int        GetWindowHeight() const override;
+        void       SetCursorPosition(float x, float y) override;
 
         MeturmRender::Window& GetWindow();
-        DataModel* GetDataModel() const;
-        void SetCursorPosition(float x, float y);
-
-        // Утилиты окна — не требуют включения MeturmRender/MeturmFrame в клиентском коде
-        int  GetWindowWidth()  const;
-        int  GetWindowHeight() const;
-        void UpdateInput();
         void SetInputSource(SunvoltumInput& target);
+
+        // Доступ к объекту ввода (привязывается при Init)
+        SunvoltumInput& GetInput();
 
     private:
         void SyncCamera();
@@ -157,6 +161,9 @@ namespace Sunvoltum {
         PropertyToken m_camFovToken;
 
         bool m_initialized = false;
+
+        // Ввод — инициализируется в Init, возвращается через GetInput()
+        SunvoltumInput m_inputObj;
     };
 
 } // namespace Sunvoltum

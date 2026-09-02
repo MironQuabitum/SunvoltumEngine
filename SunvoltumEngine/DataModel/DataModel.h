@@ -30,6 +30,10 @@ namespace Sunvoltum {
 
         Instance* FindByName(const std::string& name) override;
 
+        // Удалить прямого ребёнка по указателю.
+        // Возвращает true если объект найден и удалён.
+        bool RemoveChild(Instance* child);
+
         const std::vector<std::unique_ptr<Instance>>& GetChildren() const override;
 
     private:
