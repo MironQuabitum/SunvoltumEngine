@@ -22,24 +22,16 @@ add_library(LibSunvoltum SHARED
     "Core/Engine.cpp"
 
     # Runtime
-    "Runtime/Runtime.h"
-    "Runtime/Runtime.cpp"
+    # Runtime.h и Runtime.cpp компилируются в LibSunvoltumRender (зависят от RenderBridge)
 
     # Input
     "Input/KeyCode.h"
     "Input/MouseButton.h"
     "Input/SunvoltumInput.h"
-    "Input/SunvoltumInput.cpp"
+    # SunvoltumInput.cpp компилируется в LibSunvoltumRender (зависит от MeturmFrame)
 
-    # Rendering
+    # Rendering (только заголовок — реализация в LibSunvoltumRender.dll)
     "Rendering/RenderBridge.h"
-    "Rendering/Bridge/BridgeCommon.h"
-    "Rendering/Bridge/Init.cpp"
-    "Rendering/Bridge/Frame.cpp"
-    "Rendering/Bridge/SyncCamera.cpp"
-    "Rendering/Bridge/SyncLighting.cpp"
-    "Rendering/Bridge/SyncScene.cpp"
-    "Rendering/Bridge/SyncSkyBox.cpp"
 
     # DataModel
     "DataModel/InstanceParent.h"
@@ -124,19 +116,10 @@ endif()
 
 target_compile_definitions(LibSunvoltum PRIVATE SUNOVER_BUILD_DLL)
 target_include_directories(LibSunvoltum PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
+target_include_directories(LibSunvoltum PRIVATE ${CMAKE_SOURCE_DIR}/SunvoltumRender)
 
 
-set(METURM_ROOT "C:/MediaWork/Sunvoltum/Internal/MeturmRender")
-
-target_include_directories(LibSunvoltum PRIVATE "${METURM_ROOT}")
 target_link_libraries(LibSunvoltum PRIVATE OpenAL::OpenAL)
 target_link_libraries(LibSunvoltum PRIVATE unofficial::omniverse-physx-sdk::sdk)
 target_link_libraries(LibSunvoltum PRIVATE Vorbis::vorbis Vorbis::vorbisfile)
 target_link_libraries(LibSunvoltum PRIVATE unofficial::luau::Luau.Compiler unofficial::luau::Luau.VM)
-
-target_link_libraries(LibSunvoltum PRIVATE
-    "$<$<CONFIG:Debug>:${METURM_ROOT}/out/build/x64-Debug/MeturmRender/MeturmRender.lib>"
-    "$<$<CONFIG:Debug>:${METURM_ROOT}/out/build/x64-Debug/MeturmFrame/MeturmFrame.lib>"
-    "$<$<OR:$<CONFIG:Release>,$<CONFIG:RelWithDebInfo>>:${METURM_ROOT}/out/build/x64-Release/MeturmRender/MeturmRender.lib>"
-    "$<$<OR:$<CONFIG:Release>,$<CONFIG:RelWithDebInfo>>:${METURM_ROOT}/out/build/x64-Release/MeturmFrame/MeturmFrame.lib>"
-)

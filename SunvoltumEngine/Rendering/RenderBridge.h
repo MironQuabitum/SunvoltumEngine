@@ -6,6 +6,7 @@
 #include <vector>
 
 #include "../LibSunvoltum.h"
+#include "LibSunvoltumRender.h"
 #include "../DataModel/InstanceParent.h"   // ChildAddedToken
 #include "../DataModel/PropertyManager.h"
 #include "../Types/CFrame.h"
@@ -32,6 +33,7 @@ namespace Sunvoltum {
     class Engine;
     class DataModel;
     class Instance;
+    class SunvoltumInput;
 
     // -------------------------------------------------------------------------
     // SceneEntry — данные одного ShapePart в рендер-сцене.
@@ -57,7 +59,7 @@ namespace Sunvoltum {
         PropertyToken tokenAnchored;
     };
 
-    class LibSunvoltum RenderBridge
+    class LibSunvoltumRender RenderBridge
     {
     public:
         RenderBridge();
@@ -77,6 +79,12 @@ namespace Sunvoltum {
         MeturmRender::Window& GetWindow();
         DataModel* GetDataModel() const;
         void SetCursorPosition(float x, float y);
+
+        // Утилиты окна — не требуют включения MeturmRender/MeturmFrame в клиентском коде
+        int  GetWindowWidth()  const;
+        int  GetWindowHeight() const;
+        void UpdateInput();
+        void SetInputSource(SunvoltumInput& target);
 
     private:
         void SyncCamera();

@@ -11,7 +11,6 @@
 #include "../Types/Vector3.h"
 #include "../Types/CameraType.h"
 #include "../Input/MouseButton.h"
-#include <MeturmRender/Core/Window.h>
 #include <cmath>
 
 namespace Sunvoltum {
@@ -26,7 +25,7 @@ namespace Sunvoltum {
     {
         m_renderBridge = bridge;
         if (bridge && bridge->IsInitialized())
-            Input.SetSource(&bridge->GetWindow().GetInput());
+            bridge->SetInputSource(Input);
     }
 
     void Runtime::SetEngine(Engine* engine)
@@ -129,7 +128,7 @@ namespace Sunvoltum {
     void Runtime::Start()
     {
         if (m_renderBridge && m_renderBridge->IsInitialized() && !Input.IsValid())
-            Input.SetSource(&m_renderBridge->GetWindow().GetInput());
+            m_renderBridge->SetInputSource(Input);
 
         // Подписываемся на свойства камеры после заполнения DataModel
         InitFollowCamera();
@@ -204,8 +203,8 @@ namespace Sunvoltum {
         {
             if (!m_firstPersonLocked)
             {
-                int cx = m_renderBridge->GetWindow().GetWidth()  / 2;
-                int cy = m_renderBridge->GetWindow().GetHeight() / 2;
+                int cx = m_renderBridge->GetWindowWidth()  / 2;
+                int cy = m_renderBridge->GetWindowHeight() / 2;
                 if (!Input.IsMouseLocked())
                 {
                     Input.SetMousePosition(cx, cy);
@@ -234,8 +233,8 @@ namespace Sunvoltum {
         {
             Input.SetMouseLocked(false);
             Input.SetCursorVisible(false);
-            int cx = m_renderBridge->GetWindow().GetWidth()  / 2;
-            int cy = m_renderBridge->GetWindow().GetHeight() / 2;
+            int cx = m_renderBridge->GetWindowWidth()  / 2;
+            int cy = m_renderBridge->GetWindowHeight() / 2;
             Input.SetMousePosition(cx, cy);
             m_firstPersonLocked = false;
         }
@@ -258,7 +257,7 @@ namespace Sunvoltum {
         {
             if (m_renderBridge && m_renderBridge->IsInitialized())
             {
-                m_renderBridge->GetWindow().GetInput().Update();
+                m_renderBridge->UpdateInput();
                 if (!m_renderBridge->PollEvents())
                 {
                     m_running = false;

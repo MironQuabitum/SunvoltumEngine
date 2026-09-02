@@ -191,7 +191,7 @@ int main()
     {
         auto& face = head.AddInstance("face", Decal::ClassId);
         face.SetProperty(Decal::Face,         PropertyValue::Int(4)); // Front
-        face.SetProperty(Decal::Texture,      PropertyValue::String("PlatformContent/textures/Face.dds"));
+        face.SetProperty(Decal::Texture,      PropertyValue::String("PlatformContent/textures/EpicFace.dds"));
         face.SetProperty(Decal::Transparency, PropertyValue::Float(0.0f));
     }
 
@@ -263,21 +263,23 @@ int main()
 
     // LeftHip/RightHip: нижняя часть HRP -> верхний конец ноги
     auto& motorLeftLeg  = MakeMotor("LeftHip",       leftLeg,
-                                   -0.5f,  0.0f, 0.0f,   // C0: низ HRP (граница торса)
+                                   -0.5f,  0.0f, 0.0f,
                                     0.0f, +1.0f, 0.0f);  // C1: верх ноги
 
     auto& motorRightLeg = MakeMotor("RightHip",      rightLeg,
-                                   +0.5f,  0.0f, 0.0f,   // C0: низ HRP (граница торса)
+                                   +0.5f,  0.0f, 0.0f,
                                     0.0f, +1.0f, 0.0f);  // C1: верх ноги
 
-    // LeftShoulder/RightShoulder: бок торса на уровне плеч -> верх руки
+    // LeftShoulder/RightShoulder
+    // C0.X = ±2.0 компенсирует C1.X = ∓0.5 так что рука стоит у торса,
+    // но вращается вокруг своего внутреннего верхнего угла.
     auto& motorLeftArm  = MakeMotor("LeftShoulder",  leftArm,
-                                   -1.5f, +2.0f, 0.0f,   // C0: бок HRP, уровень плеч
-                                    0.0f, +1.0f, 0.0f);  // C1: верх руки
+                                   -2.0f, +1.5f, 0.0f,
+                                   -0.5f, +0.5f, 0.0f);
 
     auto& motorRightArm = MakeMotor("RightShoulder", rightArm,
-                                   +1.5f, +2.0f, 0.0f,   // C0: бок HRP, уровень плеч
-                                    0.0f, +1.0f, 0.0f);  // C1: верх руки
+                                   +2.0f, +1.5f, 0.0f,
+                                   +0.5f, +0.5f, 0.0f);
 
     // Neck: верх HRP -> низ головы
     auto& motorHead     = MakeMotor("Neck",          head,
@@ -290,7 +292,7 @@ int main()
     camera.SetProperty(CurrentCamera::FieldOfView,     PropertyValue::Number(70.0));
     camera.SetProperty(CurrentCamera::CameraMode,      PropertyValue::CameraType(CameraType::Follow));
     camera.SetProperty(CurrentCamera::CameraSubject,   PropertyValue::Ref(&head));
-    camera.SetProperty(CurrentCamera::MinZoomDistance, PropertyValue::Number(0.5));
+    camera.SetProperty(CurrentCamera::MinZoomDistance, PropertyValue::Number(0.0));
     camera.SetProperty(CurrentCamera::MaxZoomDistance, PropertyValue::Number(50.0));
     camera.SetProperty(CurrentCamera::CFrame,          PropertyValue::CFrame(
         Sunvoltum::CFrame::FromPosition(AX, HEAD_CY + 3.0f, AZ - 12.0f)));
@@ -431,6 +433,29 @@ int main()
             vel.Y = JUMP_VEL;
 
         // ----------------------------------------------------------------
+        //  FP-режим (зум на минимуме): тело невидимо, facingYaw = cameraYaw.
+        //  Курсор и захват мыши уже обрабатываются в Runtime::UpdateFollowCamera.
+        // ----------------------------------------------------------------
+        bool isFP = runtime.IsFirstPerson();
+
+        if (isFP)
+        {
+            // Тело смотрит туда же куда камера — мгновенно, без интерполяции
+            facingYaw = cameraYaw;
+        }
+
+        // Прозрачность частей тела: в FP-режиме всё скрыто
+        {
+            const float fp = isFP ? 1.0f : 0.0f;
+            torso.SetProperty(   ShapePart::Transparency, PropertyValue::Float(fp));
+            leftLeg.SetProperty( ShapePart::Transparency, PropertyValue::Float(fp));
+            rightLeg.SetProperty(ShapePart::Transparency, PropertyValue::Float(fp));
+            leftArm.SetProperty( ShapePart::Transparency, PropertyValue::Float(fp));
+            rightArm.SetProperty(ShapePart::Transparency, PropertyValue::Float(fp));
+            head.SetProperty(    ShapePart::Transparency, PropertyValue::Float(fp));
+        }
+
+        // ----------------------------------------------------------------
         //  Принудительно выравниваем ротацию HRP каждый кадр:
         //  - позицию берём из физики (PhysicsBridge::SyncOut уже записал)
         //  - ротацию ставим сами: чисто вокруг Y = facingYaw
@@ -471,9 +496,9 @@ int main()
         // + / - меняют скорость танца (только в танцевальном режиме)
         if (danceModeOn)
         {
-            if (input.IsKeyPressed(KeyCode::Plus))
+            if (input.IsKeyPressed(KeyCode::O))
                 danceSpeed = std::min(danceSpeed + 5.0f, 2000.0f);
-            if (input.IsKeyPressed(KeyCode::Minus))
+            if (input.IsKeyPressed(KeyCode::P))
                 danceSpeed = std::max(danceSpeed - 5.0f, 0.5f);
         }
 
@@ -482,7 +507,7 @@ int main()
         const float ARM_ANIM_ANGLE   = 0.30f;
         const float IDLE_DECAY       = 6.0f;
 
-        const float JUMP_ARM_TARGET  = -165.0f * 3.14159265f / 180.0f;
+        const float JUMP_ARM_TARGET  = -180.0f * 3.14159265f / 180.0f;
         const float JUMP_ARM_SPEED   = 10.0f;
 
         bool isJumping = !isGrounded;
@@ -512,15 +537,15 @@ int main()
 
             // Руки крутятся в разные стороны по X (pitch)
             // Левая и правая в противофазе
-            const float DANCE_ARM_ANGLE = 1.2f;  // ~69° — большой размах
-            float leftArmPitch  = std::sin(dancePhase)          * DANCE_ARM_ANGLE;
-            float rightArmPitch = std::sin(dancePhase + 3.14159265f) * DANCE_ARM_ANGLE;
+            const float DANCE_ARM_ANGLE = 1.2f;
+            float leftArmPitch  = std::sin(dancePhase)                  * DANCE_ARM_ANGLE;
+            float rightArmPitch = std::sin(dancePhase + 3.14159265f)    * DANCE_ARM_ANGLE;
 
             motorLeftArm.SetProperty(Motor6D::C0, PropertyValue::CFrame(
-                Sunvoltum::CFrame(Sunvoltum::Vector3(-1.5f, +2.0f, 0.0f),
+                Sunvoltum::CFrame(Sunvoltum::Vector3(-2.0f, +1.5f, 0.0f),
                                   Matrix3x3::FromEuler(leftArmPitch, 0.0f, 0.0f))));
             motorRightArm.SetProperty(Motor6D::C0, PropertyValue::CFrame(
-                Sunvoltum::CFrame(Sunvoltum::Vector3(+1.5f, +2.0f, 0.0f),
+                Sunvoltum::CFrame(Sunvoltum::Vector3(+2.0f, +1.5f, 0.0f),
                                   Matrix3x3::FromEuler(rightArmPitch, 0.0f, 0.0f))));
 
             // Голова крутится по Y (yaw) — влево-вправо
@@ -566,10 +591,10 @@ int main()
                                   Matrix3x3::FromEuler(+legAngle, 0.0f, 0.0f))));
 
             motorLeftArm.SetProperty(Motor6D::C0, PropertyValue::CFrame(
-                Sunvoltum::CFrame(Sunvoltum::Vector3(-1.5f, +2.0f, 0.0f),
+                Sunvoltum::CFrame(Sunvoltum::Vector3(-2.0f, +1.5f, 0.0f),
                                   Matrix3x3::FromEuler(+armAngle + jumpArmAngle, 0.0f, 0.0f))));
             motorRightArm.SetProperty(Motor6D::C0, PropertyValue::CFrame(
-                Sunvoltum::CFrame(Sunvoltum::Vector3(+1.5f, +2.0f, 0.0f),
+                Sunvoltum::CFrame(Sunvoltum::Vector3(+2.0f, +1.5f, 0.0f),
                                   Matrix3x3::FromEuler(-armAngle + jumpArmAngle, 0.0f, 0.0f))));
 
             motorHead.SetProperty(Motor6D::C0, PropertyValue::CFrame(

@@ -16,4 +16,5 @@ find_package(unofficial-omniverse-physx-sdk CONFIG REQUIRED)
 find_package(Vorbis CONFIG REQUIRED)
 
 add_subdirectory ("SunvoltumEngine")
+add_subdirectory ("SunvoltumRender")
 add_subdirectory ("SunvoltumClient")

@@ -6,18 +6,26 @@ if (CMAKE_VERSION VERSION_GREATER 3.12)
     set_property(TARGET SunvoltumClient PROPERTY CXX_STANDARD 17)
 endif()
 
-# Подключаем заголовки LibSunvoltum
+# Подключаем заголовки LibSunvoltum и LibSunvoltumRender
 target_include_directories(SunvoltumClient PRIVATE
     ${CMAKE_SOURCE_DIR}/SunvoltumEngine
+    ${CMAKE_SOURCE_DIR}/SunvoltumRender
 )
 
-# Линкуемся с LibSunvoltum.lib (импортная библиотека для .dll)
-target_link_libraries(SunvoltumClient PRIVATE LibSunvoltum)
+# Линкуемся с LibSunvoltum.lib и LibSunvoltumRender.lib
+target_link_libraries(SunvoltumClient PRIVATE LibSunvoltum LibSunvoltumRender)
 
 # После сборки — копируем LibSunvoltum.dll рядом с .exe
 add_custom_command(TARGET SunvoltumClient POST_BUILD
     COMMAND ${CMAKE_COMMAND} -E copy_if_different
         $<TARGET_FILE:LibSunvoltum>
+        $<TARGET_FILE_DIR:SunvoltumClient>
+)
+
+# Копируем LibSunvoltumRender.dll рядом с .exe
+add_custom_command(TARGET SunvoltumClient POST_BUILD
+    COMMAND ${CMAKE_COMMAND} -E copy_if_different
+        $<TARGET_FILE:LibSunvoltumRender>
         $<TARGET_FILE_DIR:SunvoltumClient>
 )
 

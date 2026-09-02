@@ -5,6 +5,7 @@
 #include <vector>
 
 #include "../LibSunvoltum.h"
+#include "LibSunvoltumRender.h"
 #include "../Input/SunvoltumInput.h"
 #include "../DataModel/PropertyManager.h"
 
@@ -17,7 +18,7 @@ namespace Sunvoltum {
     class Engine;
     class Instance;
 
-    class LibSunvoltum Runtime
+    class LibSunvoltumRender Runtime
     {
     public:
         Runtime();
@@ -32,7 +33,9 @@ namespace Sunvoltum {
         void Start();
         void Stop();
 
-        float GetCameraYaw() const { return m_followYaw; }
+        float GetCameraYaw()  const { return m_followYaw;          }
+        float GetCameraZoom() const { return m_followRadius;        }
+        bool  IsFirstPerson() const { return m_firstPersonLocked;   }
 
         SunvoltumInput Input;
 

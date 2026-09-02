@@ -1,6 +1,7 @@
 ﻿#pragma once
 
 #include "../LibSunvoltum.h"
+#include "LibSunvoltumRender.h"
 #include "KeyCode.h"
 #include "MouseButton.h"
 
@@ -9,7 +10,7 @@ namespace MeturmFrame { class Input; }
 
 namespace Sunvoltum {
 
-    class LibSunvoltum SunvoltumInput
+    class LibSunvoltumRender SunvoltumInput
     {
     public:
         SunvoltumInput() = default;
