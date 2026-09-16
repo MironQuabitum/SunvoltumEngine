@@ -3,6 +3,7 @@
 #include <memory>
 #include "../LibSunvoltum.h"
 #include "../Types/Vector3.h"
+#include "../Types/CFrame.h"
 #include "../Types/RaycastResult.h"
 
 #pragma warning(push)
@@ -32,7 +33,7 @@ namespace Sunvoltum {
 
         // Cast a ray from origin in direction (need not be normalized) up to maxDist studs.
         // Returns RaycastResult with Hit=true if any physics body was found.
-        // The ray ignores bodies whose Instance pointer matches ignoreInst (pass nullptr to ignore nothing).
+        // ignoreInst: pass nullptr to ignore nothing.
         RaycastResult Raycast(const Vector3& origin,
                               const Vector3& direction,
                               float          maxDist,

@@ -31,6 +31,11 @@ namespace Sunvoltum {
     {
         if (!m_initialized) return;
 
+        // Клиент не запускает локальную физику — сервер авторитетен.
+        // Позиции объектов обновляются через ClientReplicator (PropertyUpdate пакеты).
+        // Локальная физика будет включена позже при реализации NetworkOwnership.
+        if (m_mode == EngineMode::Client) return;
+
         // Инициализируем PhysicsBridge при первом тике —
         // к этому моменту DataModel уже заполнен объектами из main().
         if (!Physics.IsInitialized())

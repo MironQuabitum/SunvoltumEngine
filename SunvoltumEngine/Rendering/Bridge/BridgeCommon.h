@@ -1,20 +1,12 @@
-﻿#pragma once
+#pragma once
 
-// Общие включения и конвертеры типов Sunvoltum → MeturmRender.
+// Общие включения и конвертеры типов Sunvoltum → SunvoltumRender.
 // Подключается только внутри Bridge/*.cpp
 
-#include <MeturmRender/Renderer/Renderer.h>
-#include <MeturmRender/Core/Window.h>
-#include <MeturmRender/Objects/Camera.h>
-#include <MeturmRender/Objects/SunLight.h>
-#include <MeturmRender/Objects/SkyBox.h>
-#include <MeturmRender/Objects/MeshObject.h>
-#include <MeturmRender/Objects/Cursor.h>
-#include <MeturmRender/Interface/RenderTypes.h>
+#include <SunvoltumRender/SunvoltumRender.h>
+#include <SunvoltumManager/WindowManager.h>
+#include <SunvoltumManager/Interfaces/IPlatformWindow.h>
 #include <fstream>
-#include <MeturmRender/Types/CFrame.h>
-#include <MeturmRender/Types/Matrix3x3.h>
-#include <MeturmRender/Types/Mesh.h>
 
 #include "../RenderBridge.h"
 #include "../../Core/Engine.h"
@@ -30,34 +22,29 @@
 
 namespace Sunvoltum {
 
-    inline MeturmRender::Types::Render3 ToRender3(const Vector3& v)
+    inline SunvoltumRender::Types::Vector3 ToRender3(const Vector3& v)
     {
-        return MeturmRender::Types::Render3(v.X, v.Y, v.Z);
+        return SunvoltumRender::Types::Vector3(v.X, v.Y, v.Z);
     }
 
-    inline MeturmRender::Types::Matrix3x3 ToMatrix(const Matrix3x3& m)
+    inline SunvoltumRender::Types::Matrix3x3 ToMatrix(const Matrix3x3& m)
     {
-        return MeturmRender::Types::Matrix3x3(
+        return SunvoltumRender::Types::Matrix3x3(
             m.R00, m.R01, m.R02,
             m.R10, m.R11, m.R12,
             m.R20, m.R21, m.R22
         );
     }
 
-    inline MeturmRender::Types::CFrame ToCFrame(const CFrame& cf)
+    // Конвертер Sunvoltum::Mesh → SunvoltumRender::Types::Mesh
+    inline SunvoltumRender::Types::Mesh ToRenderMesh(const Sunvoltum::Mesh& mesh)
     {
-        return MeturmRender::Types::CFrame(ToRender3(cf.Position), ToMatrix(cf.Rotation));
-    }
-
-    // Конвертер Sunvoltum::Mesh → MeturmRender::Types::Mesh
-    inline MeturmRender::Types::Mesh ToRenderMesh(const Sunvoltum::Mesh& mesh)
-    {
-        std::vector<MeturmRender::Types::Vertex> verts;
+        std::vector<SunvoltumRender::Types::Vertex> verts;
         verts.reserve(mesh.Vertices.size());
 
         for (const auto& v : mesh.Vertices)
         {
-            MeturmRender::Types::Vertex rv;
+            SunvoltumRender::Types::Vertex rv;
             rv.position = ToRender3(v.Position);
             rv.normal   = ToRender3(v.Normal);
             rv.uv       = { v.UV.X, v.UV.Y };
@@ -65,7 +52,7 @@ namespace Sunvoltum {
             verts.push_back(rv);
         }
 
-        return MeturmRender::Types::Mesh(verts, mesh.Indices);
+        return SunvoltumRender::Types::Mesh(verts, mesh.Indices);
     }
 
 } // namespace Sunvoltum

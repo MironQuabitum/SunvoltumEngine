@@ -1,4 +1,5 @@
 ﻿#include "DataModel.h"
+#include <functional>
 
 namespace Sunvoltum {
 
@@ -6,6 +7,16 @@ namespace Sunvoltum {
     {
         m_instances.push_back(std::make_unique<Instance>(name, classId, this));
         Instance& child = *m_instances.back();
+        FireChildAdded(child);
+        return child;
+    }
+
+    Instance& DataModel::AddInstance(const std::string& name, ClassId classId,
+                                     std::function<void(Instance&)> initFn)
+    {
+        m_instances.push_back(std::make_unique<Instance>(name, classId, this));
+        Instance& child = *m_instances.back();
+        if (initFn) initFn(child);
         FireChildAdded(child);
         return child;
     }

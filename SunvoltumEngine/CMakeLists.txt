@@ -1,4 +1,4 @@
-﻿cmake_minimum_required(VERSION 3.8)
+cmake_minimum_required(VERSION 3.8)
 
 add_library(LibSunvoltum SHARED
     "SunvoltumEngine.cpp"
@@ -13,6 +13,7 @@ add_library(LibSunvoltum SHARED
     "Types/Vector3.h"
     "Types/Matrix3x3.h"
     "Types/CFrame.h"
+    "Types/CFrameUtils.h"
     "Types/Number.h"
     "Types/CameraType.h"
     "Types/Mesh.h"
@@ -29,7 +30,7 @@ add_library(LibSunvoltum SHARED
     "Input/KeyCode.h"
     "Input/MouseButton.h"
     "Input/SunvoltumInput.h"
-    # SunvoltumInput.cpp компилируется в LibSunvoltumRender (зависит от MeturmFrame)
+    # SunvoltumInput.cpp компилируется в LibSunvoltumRender (зависит от SunvoltumManager)
 
     # Rendering (только заголовок — реализация в LibSunvoltumRender.dll)
     "Rendering/RenderBridge.h"
@@ -49,6 +50,9 @@ add_library(LibSunvoltum SHARED
     "DataModel/InstanceRegistry.cpp"
 
     # InstanceClasses
+    "DataModel/InstanceClasses/BasePart.h"
+    "DataModel/InstanceClasses/JointInstance.h"
+    "DataModel/InstanceClasses/Weld.h"
     "DataModel/InstanceClasses/Workspace.h"
     "DataModel/InstanceClasses/CurrentCamera.h"
     "DataModel/InstanceClasses/ShapePart.h"
@@ -63,8 +67,6 @@ add_library(LibSunvoltum SHARED
     "DataModel/InstanceClasses/Folder.h"
     "DataModel/InstanceClasses/Model.h"
     "DataModel/InstanceClasses/Model.cpp"
-    "DataModel/InstanceClasses/Motor6D.h"
-    "DataModel/InstanceClasses/Motor6D.cpp"
 
     # Scripting
     "Scripting/ScriptBridge.h"
@@ -84,6 +86,11 @@ add_library(LibSunvoltum SHARED
 
     # Scripting/ClientSide
     "Scripting/ClientSide/ClientScriptBridge.h"
+    "Scripting/ClientSide/ClientScriptBridge.cpp"
+    "Scripting/ClientSide/ClientBindings.h"
+    "Scripting/ClientSide/ClientBindings.cpp"
+    "Scripting/ClientSide/ClientInstanceBindings.h"
+    "Scripting/ClientSide/ClientInstanceBindings.cpp"
 
     # SoundEngine
     "SoundEngine/SoundEngine.h"

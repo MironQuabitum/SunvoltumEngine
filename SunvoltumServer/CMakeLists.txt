@@ -29,3 +29,10 @@ add_custom_command(TARGET SunvoltumServer POST_BUILD
         ${CMAKE_SOURCE_DIR}/PlatformContent
         $<TARGET_FILE_DIR:SunvoltumServer>/PlatformContent
 )
+
+# Копируем серверные скрипты рядом с .exe
+add_custom_command(TARGET SunvoltumServer POST_BUILD
+    COMMAND ${CMAKE_COMMAND} -E copy_directory
+        ${CMAKE_CURRENT_SOURCE_DIR}/Scripts
+        $<TARGET_FILE_DIR:SunvoltumServer>/Scripts
+)

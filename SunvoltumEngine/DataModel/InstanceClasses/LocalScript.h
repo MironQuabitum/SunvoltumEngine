@@ -3,6 +3,10 @@
 #include "../PropertyId.h"
 #include "../Instance.h"
 #include "../PropertyValue.h"
+#include "../../Scripting/ClientSide/ClientScriptBridge.h"
+
+#include <istream>
+#include <string>
 
 namespace Sunvoltum {
 namespace Classes {
@@ -10,26 +14,35 @@ namespace Classes {
     constexpr int8_t CLASS_LOCALSCRIPT = 10;
 
     // LocalScript — клиентский скрипт, выполняется только на стороне клиента.
-    // В текущей версии является заглушкой: структура аналогична Script,
-    // но запуск не реализован.
+    // Запускается автоматически когда инстанс попадает в иерархию Workspace
+    // (через ClientScriptBridge::WatchWorkspace).
     struct LocalScript
     {
         static constexpr int8_t ClassId = CLASS_LOCALSCRIPT;
 
-        // Id скрипта, зарегистрированного в ScriptBridge.
         static constexpr PropertyId ScriptId = 0; // Int
-
-        // Включён ли скрипт.
         static constexpr PropertyId Disabled = 1; // Bool
 
-        // Инициализировать свойства LocalScript значениями по умолчанию.
         static void Init(Instance& inst)
         {
             inst.SetProperty(ScriptId, PropertyValue::Int(0));
             inst.SetProperty(Disabled, PropertyValue::Bool(false));
         }
 
-        // Геттеры
+        // Загрузить исходник в ClientScriptBridge и записать ScriptId в инстанс.
+        static int LoadScriptFromSource(Instance& inst, const std::string& source)
+        {
+            int id = Scripting::Client::ClientScriptBridge::Get().LoadScriptFromSource(source);
+            inst.SetProperty(ScriptId, PropertyValue::Int(id));
+            return id;
+        }
+
+        static int LoadScript(Instance& inst, std::istream& stream)
+        {
+            int id = Scripting::Client::ClientScriptBridge::Get().LoadScript(stream);
+            inst.SetProperty(ScriptId, PropertyValue::Int(id));
+            return id;
+        }
 
         static int GetScriptId(const Instance& inst)
         {

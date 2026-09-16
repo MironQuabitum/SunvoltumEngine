@@ -59,6 +59,7 @@ namespace Sunvoltum {
         : m_actor(o.m_actor)
         , m_material(o.m_material)
         , m_anchored(o.m_anchored)
+        , m_kinematic(o.m_kinematic)
         , m_canCollide(o.m_canCollide)
         , m_initialized(o.m_initialized)
         , m_size(o.m_size)
@@ -76,6 +77,7 @@ namespace Sunvoltum {
             m_actor       = o.m_actor;
             m_material    = o.m_material;
             m_anchored    = o.m_anchored;
+            m_kinematic   = o.m_kinematic;
             m_canCollide  = o.m_canCollide;
             m_initialized = o.m_initialized;
             m_size        = o.m_size;
@@ -135,7 +137,8 @@ namespace Sunvoltum {
         const Vector3& size,
         Shape          shape,
         bool           anchored,
-        bool           canCollide)
+        bool           canCollide,
+        bool           kinematic)
     {
         if (m_initialized) return true;
 
@@ -158,6 +161,7 @@ namespace Sunvoltum {
 
         // --- Актор ---
         m_anchored   = anchored;
+        m_kinematic  = kinematic && !anchored; // kinematic только для dynamic
         m_canCollide = canCollide;
         m_size       = size;
         m_shape      = shape;
@@ -210,6 +214,11 @@ namespace Sunvoltum {
             dynActor->setMaxLinearVelocity(1000.0f);
             dynActor->setMaxAngularVelocity(100.0f);
             dynActor->setMaxDepenetrationVelocity(50.0f);
+
+            // Кинематический режим: PhysX не применяет гравитацию и силы,
+            // тело двигается только через setKinematicTarget.
+            if (m_kinematic)
+                dynActor->setRigidBodyFlag(px::PxRigidBodyFlag::eKINEMATIC, true);
 
             m_actor = dynActor;
         }
@@ -289,6 +298,48 @@ namespace Sunvoltum {
         dyn->setAngularVelocity(px::PxVec3(v.X, v.Y, v.Z));
     }
 
+    // -----------------------------------------------------------------------
+    // SetKinematic — переключает режим eKINEMATIC на лету.
+    //
+    // Кинематическое тело не симулируется PhysX (нет гравитации, нет сил),
+    // но участвует в коллизиях: другие dynamic-тела отскакивают от него.
+    // Движется только через SetKinematicTarget.
+    //
+    // Требует m_anchored == false (только PxRigidDynamic).
+    // SetAnchored сохраняет m_kinematic при пересоздании актора.
+    // -----------------------------------------------------------------------
+    void PhysicsBody::SetKinematic(bool kinematic)
+    {
+        if (!m_initialized || m_anchored || !m_actor) return;
+        if (m_kinematic == kinematic) return;
+
+        auto* dyn = static_cast<px::PxRigidDynamic*>(m_actor);
+        dyn->setRigidBodyFlag(px::PxRigidBodyFlag::eKINEMATIC, kinematic);
+        m_kinematic = kinematic;
+    }
+
+    // -----------------------------------------------------------------------
+    // SetKinematicTarget — задаёт целевой CFrame для кинематического тела.
+    //
+    // PhysX переместит тело к этой позиции на следующем шаге симуляции,
+    // корректно обновив broad-phase и контакты — без депенетрационных взрывов.
+    //
+    // Вызывать каждый тик когда нужно переместить кинематическое тело.
+    // -----------------------------------------------------------------------
+    void PhysicsBody::SetKinematicTarget(const CFrame& cf)
+    {
+        if (!m_initialized || m_anchored || !m_kinematic || !m_actor) return;
+        auto* dyn = static_cast<px::PxRigidDynamic*>(m_actor);
+        dyn->setKinematicTarget(ToPxTransform(cf));
+    }
+
+    void PhysicsBody::WakeUp()
+    {
+        if (!m_initialized || m_anchored || m_kinematic || !m_actor) return;
+        auto* dyn = static_cast<px::PxRigidDynamic*>(m_actor);
+        dyn->wakeUp();
+    }
+
     void PhysicsBody::SetAnchored(bool anchored, px::PxPhysics* physics, px::PxScene* scene)
     {
         if (!m_initialized || m_anchored == anchored) return;
@@ -344,6 +395,9 @@ namespace Sunvoltum {
             dynActor->setMaxLinearVelocity(1000.0f);
             dynActor->setMaxAngularVelocity(100.0f);
             dynActor->setMaxDepenetrationVelocity(50.0f);
+            // Восстанавливаем кинематический флаг если он был активен
+            if (m_kinematic)
+                dynActor->setRigidBodyFlag(px::PxRigidBodyFlag::eKINEMATIC, true);
             dynActor->setLinearVelocity(px::PxVec3(linVel.X, linVel.Y, linVel.Z));
             dynActor->setAngularVelocity(px::PxVec3(angVel.X, angVel.Y, angVel.Z));
             m_actor = dynActor;

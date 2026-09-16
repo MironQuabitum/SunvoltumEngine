@@ -1,4 +1,4 @@
-﻿#pragma once
+#pragma once
 
 #include <functional>
 #include <chrono>
@@ -34,12 +34,17 @@ namespace Sunvoltum {
 
         void SetEngine(Engine* engine);
 
+        // Запрещает Runtime восстанавливать видимость курсора при отпускании ПКМ.
+        // Установить true когда приложение само управляет курсором (Mouse2D и т.д.).
+        // По умолчанию false — поведение как раньше.
+        void SetKeepCursorHidden(bool keep);
+
         void Start();
         void Stop();
 
         float GetCameraYaw()  const { return m_followYaw;        }
         float GetCameraZoom() const { return m_followRadius;      }
-        bool  IsFirstPerson() const { return m_firstPersonLocked; }
+        bool  IsFirstPerson() const { return m_followRadius <= 0.0f; }
 
         std::function<void(float deltaTime)>  RenderStepped;
         std::function<void(float fixedDelta)> PreSimulation;
@@ -59,9 +64,9 @@ namespace Sunvoltum {
         float m_followPitch  =  0.3f;
         float m_followRadius = 15.0f;
 
-        int  m_preLockMouseX     = 0;
-        int  m_preLockMouseY     = 0;
-        bool m_firstPersonLocked = false;
+        bool m_isRmbHeld         = false;
+        int  m_lockedMouseX       = 0;
+        int  m_lockedMouseY       = 0;
 
         static constexpr float FOLLOW_SENS        = 0.002618f;
         static constexpr float FOLLOW_PITCH_MIN   = -1.48f;
@@ -85,8 +90,11 @@ namespace Sunvoltum {
         PropertyToken m_camMinZoomToken;
         PropertyToken m_camMaxZoomToken;
 
+        bool m_isFirstPerson = false;
+
         void InitFollowCamera();
         void UpdateFollowCamera();
+        void UpdateSubjectTransparency(float radius, float step);
 
         static constexpr float FIXED_TIMESTEP = 1.0f / 240.0f;
 

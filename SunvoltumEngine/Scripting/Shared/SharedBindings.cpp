@@ -3,20 +3,26 @@
 
 #include "../../DataModel/PropertyValue.h"
 #include "../../DataModel/InstanceParent.h"
+#include "../../DataModel/InstanceClasses/BasePart.h"
 #include "../../DataModel/InstanceClasses/Workspace.h"
 #include "../../DataModel/InstanceClasses/ShapePart.h"
+#include "../../DataModel/InstanceClasses/JointInstance.h"
+#include "../../DataModel/InstanceClasses/Weld.h"
+#include "../../DataModel/InstanceClasses/Motor6D.h"
 #include "../../DataModel/InstanceClasses/Lighting.h"
 #include "../../DataModel/InstanceClasses/CurrentCamera.h"
 #include "../../DataModel/InstanceClasses/Sound.h"
 #include "../../DataModel/InstanceClasses/Decal.h"
 #include "../../DataModel/InstanceClasses/TextureSurface.h"
 #include "../../DataModel/InstanceClasses/Players.h"
+#include "../../DataModel/InstanceClasses/Player.h"
+#include "../../DataModel/InstanceClasses/Humanoid.h"
 #include "../../DataModel/InstanceClasses/Script.h"
 #include "../../DataModel/InstanceClasses/LocalScript.h"
 #include "../../DataModel/InstanceClasses/Folder.h"
 #include "../../DataModel/InstanceClasses/Model.h"
-#include "../../DataModel/InstanceClasses/Motor6D.h"
 #include "../../Types/Matrix3x3.h"
+#include "../../Types/CameraType.h"
 
 #include <cstring>
 #include <cmath>
@@ -40,6 +46,7 @@ static const char* ClassIdToName(int8_t id)
     case CLASS_SHAPEPART:      return "ShapePart";
     case CLASS_LIGHTING:       return "Lighting";
     case CLASS_PLAYERS:        return "Players";
+    case CLASS_PLAYER:         return "Player";
     case CLASS_DECAL:          return "Decal";
     case CLASS_TEXTURESURFACE: return "TextureSurface";
     case CLASS_SOUND:          return "Sound";
@@ -47,7 +54,9 @@ static const char* ClassIdToName(int8_t id)
     case CLASS_LOCALSCRIPT:    return "LocalScript";
     case CLASS_FOLDER:         return "Folder";
     case CLASS_MODEL:          return "Model";
+    case CLASS_WELD:           return "Weld";
     case CLASS_MOTOR6D:        return "Motor6D";
+    case CLASS_HUMANOID:       return "Humanoid";
     default:                   return "Instance";
     }
 }
@@ -74,15 +83,67 @@ static bool TryGetProperty(lua_State* L, Instance* inst, const char* key)
 #define PUSH_PROP(PropId) \
     { auto* p = inst->GetProperty(PropId); if (p) PushPropertyValue(L, *p); else lua_pushnil(L); return true; }
 
-    if (cls == CLASS_SHAPEPART)
+    if (IsBasePart(cls))
     {
-        if      (!strcmp(key, "CFrame"))       PUSH_PROP(ShapePart::CFrame)
-        else if (!strcmp(key, "Size"))         PUSH_PROP(ShapePart::Size)
-        else if (!strcmp(key, "Transparency")) PUSH_PROP(ShapePart::Transparency)
-        else if (!strcmp(key, "Reflectance"))  PUSH_PROP(ShapePart::Reflectance)
-        else if (!strcmp(key, "Color"))        PUSH_PROP(ShapePart::Color)
-        else if (!strcmp(key, "Anchored"))     PUSH_PROP(ShapePart::Anchored)
-        else if (!strcmp(key, "CanCollide"))   PUSH_PROP(ShapePart::CanCollide)
+        if      (!strcmp(key, "CFrame"))       PUSH_PROP(BasePart::CFrame)
+        else if (!strcmp(key, "Size"))         PUSH_PROP(BasePart::Size)
+        else if (!strcmp(key, "Transparency")) PUSH_PROP(BasePart::Transparency)
+        else if (!strcmp(key, "Reflectance"))  PUSH_PROP(BasePart::Reflectance)
+        else if (!strcmp(key, "Color"))        PUSH_PROP(BasePart::Color)
+        else if (!strcmp(key, "Anchored"))     PUSH_PROP(BasePart::Anchored)
+        else if (!strcmp(key, "CanCollide"))   PUSH_PROP(BasePart::CanCollide)
+        else if (!strcmp(key, "PosVelocity")) PUSH_PROP(BasePart::PosVelocity)
+        else if (!strcmp(key, "Velocity"))    PUSH_PROP(BasePart::PosVelocity)
+        else if (!strcmp(key, "RotVelocity")) PUSH_PROP(BasePart::RotVelocity)
+        else if (!strcmp(key, "Shape"))
+        {
+            auto* p = inst->GetProperty(BasePart::Shape);
+            if (p && p->Type == PropertyType::Shape)
+            {
+                switch (p->Value.AsShape)
+                {
+                case Sunvoltum::Shape::Ball:     lua_pushstring(L, "Ball");     break;
+                case Sunvoltum::Shape::Cylinder: lua_pushstring(L, "Cylinder"); break;
+                default:                         lua_pushstring(L, "Block");    break;
+                }
+            }
+            else
+            {
+                lua_pushstring(L, "Block");
+            }
+            return true;
+        }
+    }
+    else if (IsJoint(cls))
+    {
+        if (!strcmp(key, "Part0"))
+        {
+            const PropertyValue* pv = inst->GetProperty(JointInstance::Part0);
+            if (pv && pv->Type == PropertyType::InstanceRef && pv->Value.AsInstanceRef)
+                PushInstance(L, pv->Value.AsInstanceRef);
+            else
+                lua_pushnil(L);
+            return true;
+        }
+        else if (!strcmp(key, "Part1"))
+        {
+            const PropertyValue* pv = inst->GetProperty(JointInstance::Part1);
+            if (pv && pv->Type == PropertyType::InstanceRef && pv->Value.AsInstanceRef)
+                PushInstance(L, pv->Value.AsInstanceRef);
+            else
+                lua_pushnil(L);
+            return true;
+        }
+        else if (!strcmp(key, "C0")) PUSH_PROP(JointInstance::C0)
+        else if (!strcmp(key, "C1")) PUSH_PROP(JointInstance::C1)
+        else if (!strcmp(key, "Enabled")) PUSH_PROP(JointInstance::Enabled)
+        // Motor6D-специфичные свойства
+        else if (cls == CLASS_MOTOR6D)
+        {
+            if      (!strcmp(key, "DesiredAngle")) PUSH_PROP(Motor6D::DesiredAngle)
+            else if (!strcmp(key, "MaxVelocity"))  PUSH_PROP(Motor6D::MaxVelocity)
+            else if (!strcmp(key, "CurrentAngle")) PUSH_PROP(Motor6D::CurrentAngle)
+        }
     }
     else if (cls == CLASS_WORKSPACE)
     {
@@ -99,6 +160,32 @@ static bool TryGetProperty(lua_State* L, Instance* inst, const char* key)
     {
         if      (!strcmp(key, "CFrame"))      PUSH_PROP(CurrentCamera::CFrame)
         else if (!strcmp(key, "FieldOfView")) PUSH_PROP(CurrentCamera::FieldOfView)
+        else if (!strcmp(key, "CameraSubject"))
+        {
+            const PropertyValue* pv = inst->GetProperty(CurrentCamera::CameraSubject);
+            if (pv && pv->Type == PropertyType::InstanceRef && pv->Value.AsInstanceRef)
+                PushInstance(L, pv->Value.AsInstanceRef);
+            else
+                lua_pushnil(L);
+            return true;
+        }
+        else if (!strcmp(key, "CameraMode"))
+        {
+            const PropertyValue* pv = inst->GetProperty(CurrentCamera::CameraMode);
+            if (pv && pv->Type == PropertyType::CameraType)
+            {
+                switch (pv->Value.AsCameraType)
+                {
+                case CameraType::Scriptable: lua_pushstring(L, "Scriptable"); break;
+                default:                     lua_pushstring(L, "Follow");     break;
+                }
+            }
+            else
+            {
+                lua_pushstring(L, "Follow");
+            }
+            return true;
+        }
     }
     else if (cls == CLASS_SOUND)
     {
@@ -131,22 +218,33 @@ static bool TryGetProperty(lua_State* L, Instance* inst, const char* key)
             return true;
         }
     }
-    else if (cls == CLASS_MOTOR6D)
+    else if (cls == Classes::CLASS_PLAYER)
     {
-        // Part0 / Part1 — возвращаем Instance userdata или nil
-        if (!strcmp(key, "Part0") || !strcmp(key, "Part1"))
+        if      (!strcmp(key, "Name"))      { lua_pushstring(L, inst->GetName().c_str()); return true; }
+        else if (!strcmp(key, "Username"))  PUSH_PROP(Player::Username)
+        else if (!strcmp(key, "UserId"))    PUSH_PROP(Player::UserId)
+        else if (!strcmp(key, "NetworkId")) PUSH_PROP(Player::NetworkId)
+        else if (!strcmp(key, "Character"))
         {
-            PropertyId pid = !strcmp(key, "Part0") ? Motor6D::Part0 : Motor6D::Part1;
-            const PropertyValue* pv = inst->GetProperty(pid);
+            const PropertyValue* pv = inst->GetProperty(Player::Character);
             if (pv && pv->Type == PropertyType::InstanceRef && pv->Value.AsInstanceRef)
                 PushInstance(L, pv->Value.AsInstanceRef);
             else
                 lua_pushnil(L);
             return true;
         }
-        // C0 / C1 — возвращаем CFrame userdata
-        if (!strcmp(key, "C0")) PUSH_PROP(Motor6D::C0)
-        if (!strcmp(key, "C1")) PUSH_PROP(Motor6D::C1)
+    }
+    else if (cls == Classes::CLASS_HUMANOID)
+    {
+        if      (!strcmp(key, "Health"))        PUSH_PROP(Humanoid::Health)
+        else if (!strcmp(key, "MaxHealth"))     PUSH_PROP(Humanoid::MaxHealth)
+        else if (!strcmp(key, "WalkSpeed"))     PUSH_PROP(Humanoid::WalkSpeed)
+        else if (!strcmp(key, "JumpPower"))     PUSH_PROP(Humanoid::JumpPower)
+        else if (!strcmp(key, "HipHeight"))     PUSH_PROP(Humanoid::HipHeight)
+        else if (!strcmp(key, "State"))         PUSH_PROP(Humanoid::State)
+        else if (!strcmp(key, "Jump"))          PUSH_PROP(Humanoid::Jump)
+        else if (!strcmp(key, "MoveDirection")) PUSH_PROP(Humanoid::MoveDirection)
+        else if (!strcmp(key, "FacingYaw"))     PUSH_PROP(Humanoid::FacingYaw)
     }
 
 #undef PUSH_PROP
@@ -163,31 +261,30 @@ static bool TrySetProperty(lua_State* L, Instance* inst, const char* key)
     using namespace Classes;
     const int8_t cls = inst->GetClassId();
 
-    if (cls == CLASS_SHAPEPART)
+    if (IsBasePart(cls))
     {
         if (!strcmp(key, "Transparency"))
         {
             if (lua_isnumber(L, 3))
-                inst->SetProperty(ShapePart::Transparency,
+                inst->SetProperty(BasePart::Transparency,
                     PropertyValue::Float(static_cast<float>(lua_tonumber(L, 3))));
             return true;
-        }
-        if (!strcmp(key, "Reflectance"))
+        }        if (!strcmp(key, "Reflectance"))
         {
             if (lua_isnumber(L, 3))
-                inst->SetProperty(ShapePart::Reflectance,
+                inst->SetProperty(BasePart::Reflectance,
                     PropertyValue::Float(static_cast<float>(lua_tonumber(L, 3))));
             return true;
         }
         if (!strcmp(key, "Anchored"))
         {
-            inst->SetProperty(ShapePart::Anchored,
+            inst->SetProperty(BasePart::Anchored,
                 PropertyValue::Bool(lua_toboolean(L, 3) != 0));
             return true;
         }
         if (!strcmp(key, "CanCollide"))
         {
-            inst->SetProperty(ShapePart::CanCollide,
+            inst->SetProperty(BasePart::CanCollide,
                 PropertyValue::Bool(lua_toboolean(L, 3) != 0));
             return true;
         }
@@ -196,7 +293,7 @@ static bool TrySetProperty(lua_State* L, Instance* inst, const char* key)
             lua_getfield(L, 3, "R"); float r = static_cast<float>(lua_tonumber(L, -1)); lua_pop(L, 1);
             lua_getfield(L, 3, "G"); float g = static_cast<float>(lua_tonumber(L, -1)); lua_pop(L, 1);
             lua_getfield(L, 3, "B"); float b = static_cast<float>(lua_tonumber(L, -1)); lua_pop(L, 1);
-            inst->SetProperty(ShapePart::Color,
+            inst->SetProperty(BasePart::Color,
                 PropertyValue::Color3(Sunvoltum::Color3(r, g, b)));
             return true;
         }
@@ -205,18 +302,126 @@ static bool TrySetProperty(lua_State* L, Instance* inst, const char* key)
             lua_getfield(L, 3, "X"); float x = static_cast<float>(lua_tonumber(L, -1)); lua_pop(L, 1);
             lua_getfield(L, 3, "Y"); float y = static_cast<float>(lua_tonumber(L, -1)); lua_pop(L, 1);
             lua_getfield(L, 3, "Z"); float z = static_cast<float>(lua_tonumber(L, -1)); lua_pop(L, 1);
-            inst->SetProperty(ShapePart::Size,
+            inst->SetProperty(BasePart::Size,
                 PropertyValue::Vector3(Sunvoltum::Vector3(x, y, z)));
             return true;
         }
-        // CFrame — принимаем userdata MT_CFRAME
         if (!strcmp(key, "CFrame"))
         {
             CFrameUD* ud = TestCFrame(L, 3);
             if (ud)
-                inst->SetProperty(ShapePart::CFrame,
+                inst->SetProperty(BasePart::CFrame,
                     PropertyValue::CFrame(ud->value));
             return true;
+        }
+        if (!strcmp(key, "Shape"))
+        {
+            if (lua_isstring(L, 3))
+            {
+                const char* s = lua_tostring(L, 3);
+                Sunvoltum::Shape shape = Sunvoltum::Shape::Block;
+                if      (!strcmp(s, "Ball"))     shape = Sunvoltum::Shape::Ball;
+                else if (!strcmp(s, "Cylinder")) shape = Sunvoltum::Shape::Cylinder;
+                inst->SetProperty(BasePart::Shape,
+                    PropertyValue::Shape(shape));
+            }
+            return true;
+        }
+        if (!strcmp(key, "PosVelocity") || !strcmp(key, "Velocity"))
+        {
+            if (lua_istable(L, 3))
+            {
+                lua_getfield(L, 3, "X"); float x = static_cast<float>(lua_tonumber(L, -1)); lua_pop(L, 1);
+                lua_getfield(L, 3, "Y"); float y = static_cast<float>(lua_tonumber(L, -1)); lua_pop(L, 1);
+                lua_getfield(L, 3, "Z"); float z = static_cast<float>(lua_tonumber(L, -1)); lua_pop(L, 1);
+                inst->SetProperty(BasePart::PosVelocity,
+                    PropertyValue::Vector3(Sunvoltum::Vector3(x, y, z)));
+            }
+            return true;
+        }
+        if (!strcmp(key, "RotVelocity"))
+        {
+            if (lua_istable(L, 3))
+            {
+                lua_getfield(L, 3, "X"); float x = static_cast<float>(lua_tonumber(L, -1)); lua_pop(L, 1);
+                lua_getfield(L, 3, "Y"); float y = static_cast<float>(lua_tonumber(L, -1)); lua_pop(L, 1);
+                lua_getfield(L, 3, "Z"); float z = static_cast<float>(lua_tonumber(L, -1)); lua_pop(L, 1);
+                inst->SetProperty(BasePart::RotVelocity,
+                    PropertyValue::Vector3(Sunvoltum::Vector3(x, y, z)));
+            }
+            return true;
+        }
+    }
+    else if (IsJoint(cls))
+    {
+        // Part0 — принимаем Instance userdata или nil
+        if (!strcmp(key, "Part0"))
+        {
+            if (lua_isnil(L, 3))
+                inst->SetProperty(JointInstance::Part0, PropertyValue::Ref(nullptr));
+            else
+            {
+                Instance* ref = TestInstance(L, 3);
+                if (ref)
+                    inst->SetProperty(JointInstance::Part0, PropertyValue::Ref(ref));
+            }
+            return true;
+        }
+        // Part1 — принимаем Instance userdata или nil
+        if (!strcmp(key, "Part1"))
+        {
+            if (lua_isnil(L, 3))
+                inst->SetProperty(JointInstance::Part1, PropertyValue::Ref(nullptr));
+            else
+            {
+                Instance* ref = TestInstance(L, 3);
+                if (ref)
+                    inst->SetProperty(JointInstance::Part1, PropertyValue::Ref(ref));
+            }
+            return true;
+        }
+        // C0 / C1 — принимаем CFrame userdata
+        if (!strcmp(key, "C0"))
+        {
+            CFrameUD* ud = TestCFrame(L, 3);
+            if (ud)
+                inst->SetProperty(JointInstance::C0, PropertyValue::CFrame(ud->value));
+            return true;
+        }
+        if (!strcmp(key, "C1"))
+        {
+            CFrameUD* ud = TestCFrame(L, 3);
+            if (ud)
+                inst->SetProperty(JointInstance::C1, PropertyValue::CFrame(ud->value));
+            return true;
+        }
+        // Enabled — bool
+        if (!strcmp(key, "Enabled"))
+        {
+            inst->SetProperty(JointInstance::Enabled,
+                PropertyValue::Bool(lua_toboolean(L, 3) != 0));
+            return true;
+        }
+        // Motor6D-специфичные свойства
+        if (cls == CLASS_MOTOR6D)
+        {
+            if (!strcmp(key, "DesiredAngle"))
+            {
+                if (lua_isnumber(L, 3))
+                    inst->SetProperty(Motor6D::DesiredAngle,
+                        PropertyValue::Float(static_cast<float>(lua_tonumber(L, 3))));
+                return true;
+            }
+            if (!strcmp(key, "MaxVelocity"))
+            {
+                if (lua_isnumber(L, 3))
+                    inst->SetProperty(Motor6D::MaxVelocity,
+                        PropertyValue::Float(static_cast<float>(lua_tonumber(L, 3))));
+                return true;
+            }
+            // CurrentAngle — только для чтения, запись игнорируется
+            if (!strcmp(key, "CurrentAngle"))
+                return true;
         }
     }
     else if (cls == CLASS_WORKSPACE)
@@ -226,6 +431,13 @@ static bool TrySetProperty(lua_State* L, Instance* inst, const char* key)
             if (lua_isnumber(L, 3))
                 inst->SetProperty(Workspace::Gravity,
                     PropertyValue::Number(lua_tonumber(L, 3)));
+            return true;
+        }
+        if (!strcmp(key, "PhysicsEnabled"))
+        {
+            // readOnly=true — защита от перезаписи (аналог старого C++ SetProperty(..., true))
+            inst->SetProperty(Workspace::PhysicsEnabled,
+                PropertyValue::Bool(lua_toboolean(L, 3) != 0), /*readOnly=*/true);
             return true;
         }
     }
@@ -261,6 +473,30 @@ static bool TrySetProperty(lua_State* L, Instance* inst, const char* key)
             if (lua_isnumber(L, 3))
                 inst->SetProperty(CurrentCamera::FieldOfView,
                     PropertyValue::Number(lua_tonumber(L, 3)));
+            return true;
+        }
+        if (!strcmp(key, "CameraSubject"))
+        {
+            if (lua_isnil(L, 3))
+                inst->SetProperty(CurrentCamera::CameraSubject, PropertyValue::Ref(nullptr));
+            else
+            {
+                Instance* subj = TestInstance(L, 3);
+                if (subj)
+                    inst->SetProperty(CurrentCamera::CameraSubject, PropertyValue::Ref(subj));
+            }
+            return true;
+        }
+        if (!strcmp(key, "CameraMode"))
+        {
+            if (lua_isstring(L, 3))
+            {
+                const char* s = lua_tostring(L, 3);
+                CameraType mode = CameraType::Follow;
+                if (!strcmp(s, "Scriptable")) mode = CameraType::Scriptable;
+                inst->SetProperty(CurrentCamera::CameraMode,
+                    PropertyValue::CameraType(mode));
+            }
             return true;
         }
     }
@@ -322,28 +558,79 @@ static bool TrySetProperty(lua_State* L, Instance* inst, const char* key)
             return true;
         }
     }
-    else if (cls == CLASS_MOTOR6D)
+    else if (cls == Classes::CLASS_PLAYER)
     {
-        // motor.Part0 = part  /  motor.Part1 = part
-        if (!strcmp(key, "Part0") || !strcmp(key, "Part1"))
+        if (!strcmp(key, "Character"))
         {
-            PropertyId pid = !strcmp(key, "Part0") ? Motor6D::Part0 : Motor6D::Part1;
-            Instance* part = TestInstance(L, 3);
-            if (part)
-                inst->SetProperty(pid, PropertyValue::Ref(part));
-            else if (lua_isnil(L, 3))
-                inst->SetProperty(pid, PropertyValue::Ref(nullptr));
+            if (lua_isnil(L, 3))
+                inst->SetProperty(Player::Character, PropertyValue::Ref(nullptr));
+            else
+            {
+                Instance* ref = TestInstance(L, 3);
+                if (ref)
+                    inst->SetProperty(Player::Character, PropertyValue::Ref(ref));
+            }
             return true;
         }
-        // motor.C0 = CFrame  /  motor.C1 = CFrame
-        if (!strcmp(key, "C0") || !strcmp(key, "C1"))
+    }
+    else if (cls == Classes::CLASS_HUMANOID)
+    {
+        if (!strcmp(key, "Health"))
         {
-            PropertyId pid = !strcmp(key, "C0") ? Motor6D::C0 : Motor6D::C1;
-            CFrameUD* ud = TestCFrame(L, 3);
-            if (ud)
-                inst->SetProperty(pid, PropertyValue::CFrame(ud->value));
+            if (lua_isnumber(L, 3))
+                inst->SetProperty(Humanoid::Health,
+                    PropertyValue::Float(static_cast<float>(lua_tonumber(L, 3))));
             return true;
         }
+        if (!strcmp(key, "MaxHealth"))
+        {
+            if (lua_isnumber(L, 3))
+                inst->SetProperty(Humanoid::MaxHealth,
+                    PropertyValue::Float(static_cast<float>(lua_tonumber(L, 3))));
+            return true;
+        }
+        if (!strcmp(key, "WalkSpeed"))
+        {
+            if (lua_isnumber(L, 3))
+                inst->SetProperty(Humanoid::WalkSpeed,
+                    PropertyValue::Float(static_cast<float>(lua_tonumber(L, 3))));
+            return true;
+        }
+        if (!strcmp(key, "JumpPower"))
+        {
+            if (lua_isnumber(L, 3))
+                inst->SetProperty(Humanoid::JumpPower,
+                    PropertyValue::Float(static_cast<float>(lua_tonumber(L, 3))));
+            return true;
+        }
+        if (!strcmp(key, "HipHeight"))
+        {
+            if (lua_isnumber(L, 3))
+                inst->SetProperty(Humanoid::HipHeight,
+                    PropertyValue::Float(static_cast<float>(lua_tonumber(L, 3))));
+            return true;
+        }
+        if (!strcmp(key, "Jump"))
+        {
+            inst->SetProperty(Humanoid::Jump,
+                PropertyValue::Bool(lua_toboolean(L, 3) != 0));
+            return true;
+        }
+        if (!strcmp(key, "MoveDirection") && lua_istable(L, 3))
+        {
+            lua_getfield(L, 3, "X"); float x = static_cast<float>(lua_tonumber(L, -1)); lua_pop(L, 1);
+            lua_getfield(L, 3, "Y"); float y = static_cast<float>(lua_tonumber(L, -1)); lua_pop(L, 1);
+            lua_getfield(L, 3, "Z"); float z = static_cast<float>(lua_tonumber(L, -1)); lua_pop(L, 1);
+            inst->SetProperty(Humanoid::MoveDirection,
+                PropertyValue::Vector3(Sunvoltum::Vector3(x, y, z)));
+            return true;
+        }
+        // State — только для чтения из Lua (пишет PhysicsBridge)
+        if (!strcmp(key, "State"))
+            return true;
+        // FacingYaw — только для чтения из Lua (пишет PhysicsBridge)
+        if (!strcmp(key, "FacingYaw"))
+            return true;
     }
 
     return false;
@@ -354,8 +641,7 @@ static bool TrySetProperty(lua_State* L, Instance* inst, const char* key)
 // ===========================================================================
 
 // model:PivotTo(cframe)
-static int Model_PivotTo(lua_State* L)
-{
+static int Model_PivotTo(lua_State* L){
     // upvalue 1 = Instance* (model)
     Instance* model = static_cast<Instance*>(lua_touserdata(L, lua_upvalueindex(1)));
     if (!model)
@@ -460,6 +746,15 @@ static int Instance_NewIndex(lua_State* L)
     // [1]=userdata(Instance*), [2]=key, [3]=value
     Instance* inst  = CheckInstance(L, 1);
     const char* key = luaL_checkstring(L, 2);
+
+    // Name — переименование объекта
+    if (!strcmp(key, "Name"))
+    {
+        if (lua_isstring(L, 3))
+            inst->SetName(lua_tostring(L, 3));
+        return 0;
+    }
+
     TrySetProperty(L, inst, key);
     return 0;
 }
@@ -750,7 +1045,9 @@ static int8_t ClassNameToId(const char* name)
     if (!strcmp(name, "LocalScript"))    return CLASS_LOCALSCRIPT;
     if (!strcmp(name, "Folder"))         return CLASS_FOLDER;
     if (!strcmp(name, "Model"))          return CLASS_MODEL;
+    if (!strcmp(name, "Weld"))           return CLASS_WELD;
     if (!strcmp(name, "Motor6D"))        return CLASS_MOTOR6D;
+    if (!strcmp(name, "Humanoid"))       return CLASS_HUMANOID;
     return -1;
 }
 
@@ -781,12 +1078,38 @@ static int Instance_New(lua_State* L)
         parent = parentInst;
     }
 
-    // Создаём инстанс
-    Instance& inst = parent->AddInstance(className, classId);
+    // Создаём инстанс.
+    //
+    // Суставы (IsJoint) используют initFn-перегрузку: свойства устанавливаются
+    // ДО FireChildAdded, поэтому ServerReplicator::SubscribeProperties подхватит
+    // Part0/Part1/C0/C1/Enabled уже существующими в GetProperties().
+    //
+    // GetJointInitFn — диспетчер по classId: при добавлении нового типа сустава
+    // достаточно добавить ветку здесь и создать соответствующий JointClass::Init().
+    //
+    // Возвращает nullptr если класс не является суставом или не требует initFn.
+    // -----------------------------------------------------------------------
+    auto GetJointInitFn = [](int8_t id) -> std::function<void(Instance&)>
+    {
+        using namespace Classes;
+        if (id == CLASS_WELD)
+            return [](Instance& i) { Weld::Init(i); };
+        if (id == CLASS_MOTOR6D)
+            return [](Instance& i) { Motor6D::Init(i); };
+        if (id == CLASS_HUMANOID)
+            return [](Instance& i) { Humanoid::Init(i); };
+        return nullptr;
+    };
+    // -----------------------------------------------------------------------
 
-    // Инициализируем свойства по умолчанию для классов с нетривиальным Init
-    if (classId == Classes::CLASS_MOTOR6D)
-        Classes::Motor6D::Init(inst);
+    if (auto initFn = GetJointInitFn(classId))
+    {
+        Instance& inst = parent->AddInstance(className, classId, std::move(initFn));
+        PushInstance(L, &inst);
+        return 1;
+    }
+
+    Instance& inst = parent->AddInstance(className, classId);
 
     PushInstance(L, &inst);
     return 1;

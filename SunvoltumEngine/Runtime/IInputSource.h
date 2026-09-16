@@ -1,5 +1,6 @@
 #pragma once
 
+#include "../LibSunvoltum.h"
 #include "../Input/KeyCode.h"
 #include "../Input/MouseButton.h"
 
@@ -10,7 +11,7 @@ namespace Sunvoltum {
     // Runtime не знает про SunvoltumInput или MeturmFrame::Input —
     // только этот интерфейс. Реализуется в LibSunvoltumRender.
     // -------------------------------------------------------------------------
-    class IInputSource
+    class LibSunvoltum IInputSource
     {
     public:
         virtual ~IInputSource() = default;
@@ -32,9 +33,20 @@ namespace Sunvoltum {
         virtual int GetMouseDeltaY() const = 0;
         virtual int GetMouseWheel()  const = 0;
 
-        // Захват / видимость курсора
-        virtual void SetCursorVisible(bool visible) = 0;
-        virtual bool IsCursorVisible() const = 0;
+        // Захват / видимость курсоров
+        virtual void SetSystemCursorVisible(bool visible) = 0;
+        virtual bool IsSystemCursorVisible() const = 0;
+
+        virtual void SetEngineCursorVisible(bool visible) = 0;
+        virtual bool IsEngineCursorVisible() const = 0;
+
+        // Совместимость
+        virtual void SetCursorVisible(bool visible) { SetEngineCursorVisible(visible); }
+        virtual bool IsCursorVisible() const { return IsEngineCursorVisible(); }
+
+        virtual int  GetRawMouseDeltaX() const = 0;
+        virtual int  GetRawMouseDeltaY() const = 0;
+
         virtual void SetMouseLocked(bool locked) = 0;
         virtual bool IsMouseLocked() const = 0;
         virtual void ResetMouseDelta() = 0;

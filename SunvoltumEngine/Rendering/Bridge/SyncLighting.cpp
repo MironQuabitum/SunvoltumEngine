@@ -1,6 +1,6 @@
-﻿#include "BridgeCommon.h"
+#include "BridgeCommon.h"
 #include "../../DataModel/InstanceClasses/CurrentCamera.h"
-#include <MeturmRender/Objects/SkyBox.h>
+#include <SunvoltumRender/Objects/SkyBox.h>
 #include <iostream>
 #include <cmath>
 #include <algorithm>
@@ -53,9 +53,6 @@ namespace Sunvoltum {
 
         auto& pm = PropertyManager::Get();
 
-        // ClockTime меняется каждый кадр в demo (clocktime += dt*0.1f) —
-        // подписка гарантирует пересчёт только когда значение реально изменилось,
-        // а не каждый кадр вызывать SyncLighting вхолостую.
         m_lightClockToken = pm.Subscribe(m_lightingInst, Classes::Lighting::ClockTime,
             [this](const PropertyValue& val)
             {
@@ -86,8 +83,6 @@ namespace Sunvoltum {
 
     // -------------------------------------------------------------------------
     // RecalcLighting — вычисляет и применяет освещение из закэшированных значений.
-    // Вызывается из SyncLighting() только если m_needLightingSync == true.
-    // Позиция камеры для billboard sun/moon читается каждый раз (меняется каждый кадр).
     // -------------------------------------------------------------------------
     void RenderBridge::RecalcLighting()
     {
@@ -123,19 +118,14 @@ namespace Sunvoltum {
         const float lightAlt = altitude * dayT + moonAlt * nightT;
         const float lightAz  = azimuth  * dayT + moonAz  * nightT;
 
-        MeturmRender::Types::CFrame lightCF = ToCFrame(
-            Sunvoltum::CFrame(
-                Vector3(std::cosf(lightAlt) * std::sinf(lightAz) * 500.0f,
-                        std::sinf(lightAlt) * 500.0f,
-                        std::cosf(lightAlt) * std::cosf(lightAz) * 500.0f),
-                Matrix3x3::FromEuler(lightAlt, lightAz, 0.0f)
-            )
-        );
-        m_sunLight->SetCFrame(lightCF);
+        // Направление лучей света (от источника к сцене)
+        const float lx = -(std::cosf(lightAlt) * std::sinf(lightAz));
+        const float ly = -std::sinf(lightAlt);
+        const float lz = -(std::cosf(lightAlt) * std::cosf(lightAz));
 
         const float dayIntensity  = sunHeight01 * brightness;
         const float moonIntensity = 0.4f * brightness;
-        m_sunLight->SetIntensity(dayIntensity * dayT + moonIntensity * nightT);
+        const float lightIntensity = dayIntensity * dayT + moonIntensity * nightT;
 
         float sr, sg, sb;
         if (sunHeight01 < 0.08f)
@@ -153,9 +143,18 @@ namespace Sunvoltum {
             sr = 1.0f; sg = 0.98f; sb = 0.95f;
         }
         const float lr = 1.0f, lg = 1.0f, lb = 1.0f;
-        m_sunLight->SetColor(sr * dayT + lr * nightT,
-                             sg * dayT + lg * nightT,
-                             sb * dayT + lb * nightT);
+        float lightR = sr * dayT + lr * nightT;
+        float lightG = sg * dayT + lg * nightT;
+        float lightB = sb * dayT + lb * nightT;
+
+        if (m_sunLight)
+        {
+            m_sunLight->SetDirection({ lx, ly, lz });
+            m_sunLight->SetColor({ lightR, lightG, lightB, 1.0f });
+            m_sunLight->SetIntensity(lightIntensity);
+            if (m_renderer)
+                m_renderer->SetDirectionalLight(*m_sunLight);
+        }
 
         float ambientT = Clamp01(sunHeight01 * 4.0f);
         float ar, ag, ab;
@@ -164,10 +163,8 @@ namespace Sunvoltum {
         ar = ar * dayT + nar * nightT;
         ag = ag * dayT + nag * nightT;
         ab = ab * dayT + nab * nightT;
-        m_sunLight->SetAmbient(ar * brightness, ag * brightness, ab * brightness);
-        m_sunLight->SetOutdoorAmbient(ar * brightness * 1.2f,
-                                      ag * brightness * 1.2f,
-                                      ab * brightness * 1.2f);
+        if (m_renderer)
+            m_renderer->SetAmbientLight({ ar, ag, ab, 1.0f }, brightness);
 
         // --- Скайбоксы ---
         if (m_skyBox)
@@ -177,16 +174,26 @@ namespace Sunvoltum {
                                    * Clamp01(1.0f - nightT);
             float tr, tg, tb;
             LerpColor(sunsetPeak, 1.0f, 1.0f, 1.0f, 1.0f, 0.75f, 0.45f, tr, tg, tb);
-            m_skyBox->SetColor(MeturmRender::Types::Color(tr, tg, tb, 1.0f));
+            m_skyBox->SetColor(SunvoltumRender::Types::Color(tr, tg, tb, 1.0f));
         }
         if (m_skyBoxNight)
         {
             m_skyBoxNight->SetTransparency(dayT);
-            m_skyBoxNight->SetColor(MeturmRender::Types::Color(1.0f, 1.0f, 1.0f, 1.0f));
+            m_skyBoxNight->SetColor(SunvoltumRender::Types::Color(1.0f, 1.0f, 1.0f, 1.0f));
         }
 
-        // --- Билборды солнца и луны ---
-        // Позиция камеры читается каждый раз — она меняется каждый кадр.
+        // Кэшируем углы — UpdateCelestialBillboards() использует их каждый кадр.
+        m_sunAltitude  = altitude;
+        m_sunAzimuth   = azimuth;
+        m_moonAltitude = moonAlt;
+        m_moonAzimuth  = moonAz;
+    }
+
+    // -------------------------------------------------------------------------
+    // UpdateCelestialBillboards — вызывается каждый кадр из SyncLighting().
+    // -------------------------------------------------------------------------
+    void RenderBridge::UpdateCelestialBillboards()
+    {
         Vector3 camPos = { 0.0f, 0.0f, 0.0f };
         if (m_cameraInst)
         {
@@ -196,7 +203,7 @@ namespace Sunvoltum {
         }
 
         auto MakeBillboard = [&](float dirAlt, float dirAz, float dist,
-                                 MeturmRender::Objects::MeshObject* mesh,
+                                 SunvoltumRender::Objects::MeshObject* mesh,
                                  float scaleXY)
         {
             if (!mesh) return;
@@ -223,25 +230,36 @@ namespace Sunvoltum {
             const float uZ = fwdX * rY - fwdY * rX;
 
             const Matrix3x3 rot(rX, uX, fwdX, rY, uY, fwdY, rZ, uZ, fwdZ);
-            mesh->SetCFrame(ToCFrame(Sunvoltum::CFrame(pos, rot)));
-            mesh->SetScale(scaleXY, scaleXY, 1.0f);
+            mesh->SetPosition(ToRender3(pos));
+            mesh->SetRotation(ToMatrix(rot));
+            mesh->SetScale({ scaleXY, scaleXY, 1.0f });
         };
 
-        MakeBillboard(altitude, azimuth, 100.0f, m_sunMesh.get(),  30.0f);
-        MakeBillboard(moonAlt,  moonAz,  100.0f, m_moonMesh.get(), 25.0f);
+        MakeBillboard(m_sunAltitude,  m_sunAzimuth,  100.0f, m_sunMesh.get(),  30.0f);
+        MakeBillboard(m_moonAltitude, m_moonAzimuth, 100.0f, m_moonMesh.get(), 25.0f);
     }
 
     // -------------------------------------------------------------------------
     // SyncLighting — вызывается каждый кадр из Frame().
-    // Пересчёт происходит только если m_needLightingSync == true.
-    // ClockTime меняется каждый кадр в demo → флаг ставится каждый кадр,
-    // но сам расчёт вынесен в RecalcLighting() и не дублируется.
+    //
+    // Полный пересчёт освещения (цвет, интенсивность, скайбокс) происходит
+    // только при m_needLightingSync == true — т.е. когда с сервера пришло
+    // новое значение ClockTime/Latitude/Brightness.
+    //
+    // Позиции billboard-мешей солнца/луны обновляются КАЖДЫЙ кадр через
+    // UpdateCelestialBillboards() — они должны всегда следовать за камерой,
+    // даже если сетевые обновления задержались из-за высокого пинга.
     // -------------------------------------------------------------------------
     void RenderBridge::SyncLighting()
     {
-        if (!m_needLightingSync) return;
-        m_needLightingSync = false;
-        RecalcLighting();
+        if (m_needLightingSync)
+        {
+            m_needLightingSync = false;
+            RecalcLighting();
+        }
+
+        // Всегда — каждый кадр — независимо от сетевых обновлений.
+        UpdateCelestialBillboards();
     }
 
 } // namespace Sunvoltum

@@ -14,6 +14,7 @@ namespace Sunvoltum {
     }
 
     const std::string& Instance::GetName()    const { return m_name;    }
+    void               Instance::SetName(const std::string& name) { m_name = name; }
     ClassId            Instance::GetClassId() const { return m_classId; }
 
     InstanceParent* Instance::GetParent() const     { return m_parent; }
@@ -26,6 +27,16 @@ namespace Sunvoltum {
     {
         m_children.push_back(std::make_unique<Instance>(name, classId, this));
         Instance& child = *m_children.back();
+        FireChildAdded(child);
+        return child;
+    }
+
+    Instance& Instance::AddInstance(const std::string& name, ClassId classId,
+                                     std::function<void(Instance&)> initFn)
+    {
+        m_children.push_back(std::make_unique<Instance>(name, classId, this));
+        Instance& child = *m_children.back();
+        if (initFn) initFn(child);   // инициализация ДО FireChildAdded
         FireChildAdded(child);
         return child;
     }

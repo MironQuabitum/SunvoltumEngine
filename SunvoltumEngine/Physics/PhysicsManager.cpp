@@ -34,11 +34,21 @@ namespace Sunvoltum {
             return false;
         }
 
+        // --- Extensions (нужны для PxFixedJoint и др.) ---
+        if (!PxInitExtensions(*m_physics, nullptr))
+        {
+            std::cerr << "[PhysicsManager] PxInitExtensions failed\n";
+            PxSafeRelease(m_physics);
+            PxSafeRelease(m_foundation);
+            return false;
+        }
+
         // --- CPU Dispatcher (PGS работает на CPU) ---
         m_dispatcher = px::PxDefaultCpuDispatcherCreate(numThreads);
         if (!m_dispatcher)
         {
             std::cerr << "[PhysicsManager] PxDefaultCpuDispatcherCreate failed\n";
+            PxCloseExtensions();
             PxSafeRelease(m_physics);
             PxSafeRelease(m_foundation);
             return false;
@@ -54,6 +64,7 @@ namespace Sunvoltum {
         if (!m_initialized) return;
 
         PxSafeRelease(m_dispatcher);
+        PxCloseExtensions();
         PxSafeRelease(m_physics);
         PxSafeRelease(m_foundation);
 

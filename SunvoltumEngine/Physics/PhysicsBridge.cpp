@@ -5,26 +5,29 @@
 #include "../Core/Engine.h"
 #include "../DataModel/DataModel.h"
 #include "../DataModel/Instance.h"
+#include "../DataModel/InstanceClasses/BasePart.h"
 #include "../DataModel/InstanceClasses/ShapePart.h"
+#include "../DataModel/InstanceClasses/JointInstance.h"
+#include "../DataModel/InstanceClasses/Weld.h"
+#include "../DataModel/InstanceClasses/Motor6D.h"
+#include "../DataModel/InstanceClasses/Humanoid.h"
 #include "../DataModel/InstanceClasses/Workspace.h"
 #include "../DataModel/InstanceClasses/Model.h"
 #include "../DataModel/InstanceClasses/Folder.h"
-#include "../DataModel/InstanceClasses/Motor6D.h"
+#include "../DataModel/InstanceRegistry.h"
 #include "../DataModel/PropertyValue.h"
 #include "../DataModel/PropertyManager.h"
-#include "../DataModel/InstanceParent.h"   // ChildAddedToken
+#include "../DataModel/InstanceParent.h"
 #include "../Types/RaycastResult.h"
+#include "../Types/CFrameUtils.h"
+#include "../Types/Matrix3x3.h"
 #include <unordered_map>
 #include <unordered_set>
 #include <vector>
-#include <cmath>
 #include <iostream>
+#include <cmath>
 
 namespace Sunvoltum {
-
-    // PhysX works in studs directly -- no unit conversion needed.
-    // 1 stud = 1 PhysX unit. Gravity is set in studs/s^2.
-    static constexpr float STUDS_TO_METERS = 1.0f;
 
     static float GravityToPhysX(float studsPerSecSq)
     {
@@ -32,55 +35,152 @@ namespace Sunvoltum {
     }
 
     // -----------------------------------------------------------------------
-    // Инверсия CFrame (только для ортогональных матриц вращения).
-    // Inv(cf) = CFrame(-R^T * p, R^T)
-    // Используется в Motor6D: worldCF1 = Part0.CFrame * C0 * Inv(C1)
+    // Локальный конвертер CFrame → PxTransform (дублирует PhysicsBody::ToPxTransform,
+    // но тот приватный, поэтому держим свой здесь).
     // -----------------------------------------------------------------------
-    static CFrame CFrameInverse(const CFrame& cf)
+    static px::PxTransform CFrameToPx(const CFrame& cf)
     {
-        // Транспонирование матрицы вращения = её обратная (т.к. ортогональная)
-        const Matrix3x3& R = cf.Rotation;
-        Matrix3x3 Rt(
-            R.R00, R.R10, R.R20,
-            R.R01, R.R11, R.R21,
-            R.R02, R.R12, R.R22
+        const Vector3&   p = cf.Position;
+        const Matrix3x3& r = cf.Rotation;
+        px::PxMat33 mat(
+            px::PxVec3(r.R00, r.R10, r.R20),
+            px::PxVec3(r.R01, r.R11, r.R21),
+            px::PxVec3(r.R02, r.R12, r.R22)
         );
-        // Обратная позиция: -R^T * p
-        const Vector3& p = cf.Position;
-        Vector3 invPos(
-            -(Rt.R00 * p.X + Rt.R01 * p.Y + Rt.R02 * p.Z),
-            -(Rt.R10 * p.X + Rt.R11 * p.Y + Rt.R12 * p.Z),
-            -(Rt.R20 * p.X + Rt.R21 * p.Y + Rt.R22 * p.Z)
-        );
-        return CFrame(invPos, Rt);
+        px::PxQuat q(mat);
+        q.normalize();
+        return px::PxTransform(px::PxVec3(p.X, p.Y, p.Z), q);
     }
 
     // -----------------------------------------------------------------------
-    // Данные одного Motor6D-соединения.
+    // Создать PxFixedJoint между двумя телами по формуле Weld.
+    //
+    // Joint-фреймы задаются в мировых координатах (PxFixedJointCreate принимает
+    // localFrame0 и localFrame1 относительно соответствующих акторов):
+    //
+    //   attachment_world = Part0.CFrame * C0
+    //   localFrame0      = Inverse(Part0.CFrame) * attachment_world  = C0
+    //   localFrame1      = Inverse(Part1.CFrame) * attachment_world
+    //                    = Inverse(Part1.CFrame) * Part0.CFrame * C0
+    //
+    // При правильно выставленных C0/C1 (как в SyncJoints):
+    //   Part1.CFrame = Part0.CFrame * C0 * Inverse(C1)
+    // значит localFrame1 = C1.
     // -----------------------------------------------------------------------
-    struct Motor6DEntry
+    static px::PxFixedJoint* CreateFixedJoint(
+        px::PxPhysics* physics,
+        px::PxRigidActor* actor0, const CFrame& cf0, const CFrame& c0,
+        px::PxRigidActor* actor1, const CFrame& c1)
     {
-        Instance* motorInst = nullptr; // сам объект Motor6D
-        Instance* part0     = nullptr; // опорная часть
-        Instance* part1     = nullptr; // ведомая часть
+        px::PxTransform localFrame0 = CFrameToPx(c0);
+        px::PxTransform localFrame1 = CFrameToPx(c1);
 
-        // Подписки на изменения C0, C1, Part0, Part1 у этого мотора
-        PropertyToken c0Token;
-        PropertyToken c1Token;
-        PropertyToken part0Token;
-        PropertyToken part1Token;
-    };
+        px::PxFixedJoint* joint = PxFixedJointCreate(
+            *physics,
+            actor0, localFrame0,
+            actor1, localFrame1
+        );
+
+        if (joint)
+        {
+            // Отключаем collision между связанными телами — иначе они будут
+            // сами себя выталкивать при начальном перекрытии.
+            joint->setConstraintFlag(px::PxConstraintFlag::eCOLLISION_ENABLED, false);
+        }
+
+        return joint;
+    }
 
     // -----------------------------------------------------------------------
-    // Подписки на свойства одного ShapePart-тела (редко меняющиеся).
+    // CreateMotorJoint — создаёт PxD6Joint для Motor6D.
+    //
+    // Конфигурация: все 6 степеней свободы заблокированы кроме eTWIST (вращение
+    // вокруг X-оси local frame). Привод eTWIST_DRIVE задаёт скоростной режим:
+    //   driveVelocity = sign(DesiredAngle - CurrentAngle) * MaxVelocity
+    // Это повторяет поведение Roblox Motor6D — мотор крутится с постоянной
+    // скоростью MaxVelocity пока не достигнет DesiredAngle, затем останавливается.
+    //
+    // Возвращает PxD6Joint* (приводится к PxJoint* и хранится в JointEntry).
+    // -----------------------------------------------------------------------
+    static px::PxD6Joint* CreateMotorJoint(
+        px::PxPhysics* physics,
+        px::PxRigidActor* actor0, const CFrame& c0,
+        px::PxRigidActor* actor1, const CFrame& c1)
+    {
+        px::PxTransform localFrame0 = CFrameToPx(c0);
+        px::PxTransform localFrame1 = CFrameToPx(c1);
+
+        px::PxD6Joint* joint = PxD6JointCreate(
+            *physics,
+            actor0, localFrame0,
+            actor1, localFrame1
+        );
+
+        if (!joint) return nullptr;
+
+        // Блокируем все линейные и угловые степени свободы...
+        joint->setMotion(px::PxD6Axis::eX,     px::PxD6Motion::eLOCKED);
+        joint->setMotion(px::PxD6Axis::eY,     px::PxD6Motion::eLOCKED);
+        joint->setMotion(px::PxD6Axis::eZ,     px::PxD6Motion::eLOCKED);
+        joint->setMotion(px::PxD6Axis::eSWING1, px::PxD6Motion::eLOCKED);
+        joint->setMotion(px::PxD6Axis::eSWING2, px::PxD6Motion::eLOCKED);
+        // ...кроме eTWIST — вращение вокруг X-оси
+        joint->setMotion(px::PxD6Axis::eTWIST, px::PxD6Motion::eFREE);
+
+        // Настраиваем скоростной привод на оси TWIST.
+        // Стiffness=0, damping=1 — чистый velocity drive (нет пружины).
+        // forceLimit = большое число — не ограничиваем усилие.
+        px::PxD6JointDrive drive(
+            /*stiffness=*/  0.0f,
+            /*damping=*/    1.0f,
+            /*forceLimit=*/ PX_MAX_F32,
+            /*isAcceleration=*/ false
+        );
+        joint->setDrive(px::PxD6Drive::eTWIST, drive);
+
+        // Отключаем коллизию между связанными телами.
+        joint->setConstraintFlag(px::PxConstraintFlag::eCOLLISION_ENABLED, false);
+
+        return joint;
+    }
+
+
     // -----------------------------------------------------------------------
     struct BodySubscriptions
     {
         PropertyToken anchored;
         PropertyToken canCollide;
-        PropertyToken cframe;   // телепорт
+        PropertyToken cframe;
         PropertyToken size;
         PropertyToken shape;
+    };
+
+    // -----------------------------------------------------------------------
+    // Данные одного Joint-сустава (Weld, Motor6D и т.д.).
+    //
+    // joint хранит базовый PxJoint*. Конкретный тип сустава определяется
+    // classId инстанса (CLASS_WELD → PxFixedJoint, CLASS_MOTOR6D → PxRevoluteJoint / PxD6Joint).
+    // Приводить к нужному типу следует через joint->getConcreteType() или
+    // через classId самого jointInst.
+    // -----------------------------------------------------------------------
+    struct JointEntry
+    {
+        Instance*     jointInst = nullptr; // сам Joint-инстанс (Weld, Motor6D, ...)
+        Instance*     part0     = nullptr; // кэш Part0 (обновляется при изменении свойства)
+        Instance*     part1     = nullptr; // кэш Part1
+        px::PxJoint*  joint     = nullptr; // PhysX сустав (nullptr если не создан)
+    };
+
+    // -----------------------------------------------------------------------
+    // Подписки на свойства одного Joint-инстанса.
+    // -----------------------------------------------------------------------
+    struct JointSubscriptions
+    {
+        PropertyToken part0;
+        PropertyToken part1;
+        PropertyToken c0;
+        PropertyToken c1;
+        PropertyToken enabled;
     };
 
     // -----------------------------------------------------------------------
@@ -95,58 +195,53 @@ namespace Sunvoltum {
         PhysicsWorld   world;
 
         // Кэш тел: ключ — reinterpret_cast<uintptr_t>(Instance*)
-        std::unordered_map<uintptr_t, PhysicsBody>       bodies;
+        std::unordered_map<uintptr_t, PhysicsBody>        bodies;
+        std::vector<uintptr_t>                            bodyOrder;
+        std::unordered_map<uintptr_t, BodySubscriptions>  bodyTokens;
 
-        // Порядок добавления — SyncIn/SyncOut итерируют именно его.
-        // Никакого обхода дерева в hot path.
-        std::vector<uintptr_t>                           bodyOrder;
-
-        // Подписки per-тело
-        std::unordered_map<uintptr_t, BodySubscriptions> bodyTokens;
-
-        // Подписка на Workspace::Gravity
-        PropertyToken gravityToken;
-
-        // Подписка на ChildAdded Workspace — живёт до Shutdown
-        ChildAddedToken workspaceChildToken;
-
-        // Подписки на ChildAdded вложенных контейнеров (Model, Folder)
+        PropertyToken            gravityToken;
+        ChildAddedToken          workspaceChildToken;
         std::vector<ChildAddedToken> containerTokens;
 
-        // Телепорты dynamic тел в текущем тике (SetProperty(CFrame) извне)
+        // Телепорты dynamic тел в текущем тике
         std::unordered_set<uintptr_t> pendingTeleports;
 
-        // -----------------------------------------------------------------------
-        // Motor6D: список активных соединений.
-        // Ключ — reinterpret_cast<uintptr_t>(Instance*) мотора.
-        // -----------------------------------------------------------------------
-        std::unordered_map<uintptr_t, Motor6DEntry> motors;
-        std::vector<uintptr_t>                      motorOrder;
+        // Суставы (Weld, Motor6D, ...): ключ — reinterpret_cast<uintptr_t>(Joint Instance*)
+        std::unordered_map<uintptr_t, JointEntry>         joints;
+        std::vector<uintptr_t>                            jointOrder;
+        std::unordered_map<uintptr_t, JointSubscriptions> jointTokens;
 
-        // true пока выполняется SyncOut — CFrame-callback пропускает round-trip
+        // true пока выполняется SyncOut
         bool inSyncOut   = false;
         bool initialized = false;
 
-        // Создать PhysicsBody для ShapePart и зарегистрировать подписки.
-        // Вызывается из SubscribeWorkspace (и через ChildAdded коллбэк).
         void RegisterBody(Instance* inst);
-
-        // Зарегистрировать Motor6D-соединение.
-        void RegisterMotor(Instance* inst);
-
-        // Рекурсивно обходит контейнер (Workspace/Model/Folder), регистрирует ShapePart'ы.
         void RegisterBodyRecursive(Instance* inst);
-
-        // Подписки на редко меняющиеся свойства тела
         void SubscribeBody(Instance* inst);
-
-        // Подписаться на ChildAdded Workspace; зарегистрировать уже существующие тела
         void SubscribeWorkspace();
-
-        // velocity sync + SyncOut
         void SyncIn();
         void SyncOut();
-        void SyncMotors(); // Motor6D: обновляем CFrame ведомых частей
+
+        void RegisterJoint(Instance* inst);
+        void SubscribeJoint(Instance* inst);
+        void SyncJointsDrive(); // до world.Step: применяет DriveVelocity для Motor6D
+        void SyncJointsRead();  // после world.Step: читает CurrentAngle из PhysX
+
+        // -----------------------------------------------------------------------
+        // Humanoid-записи: per-Humanoid runtime-состояние.
+        // Ключ — reinterpret_cast<uintptr_t>(humanoidInst*).
+        // -----------------------------------------------------------------------
+        struct HumanoidEntry
+        {
+            Instance* humanoidInst = nullptr; // сам Humanoid
+            Instance* hrpInst      = nullptr; // HumanoidRootPart (братья в Model)
+            float     facingYaw    = 0.0f;    // текущий угол поворота тела (рад)
+        };
+
+        std::unordered_map<uintptr_t, HumanoidEntry> humanoids;
+
+        void RegisterHumanoid(Instance* humanoidInst);
+        void SyncHumanoidTurn(float dt); // плавный поворот HRP к MoveDirection
     };
 
     // -----------------------------------------------------------------------
@@ -168,7 +263,6 @@ namespace Sunvoltum {
         if (!m_impl->manager.Init(0))
             return false;
 
-        // Начальная гравитация из Workspace
         float gravityStuds = 196.2f;
         {
             Instance* ws = m_impl->dataModel->FindByName("Workspace");
@@ -210,7 +304,6 @@ namespace Sunvoltum {
             }
         }
 
-        // Подписываемся на Workspace::ChildAdded и регистрируем существующие тела
         m_impl->SubscribeWorkspace();
 
         m_impl->initialized = true;
@@ -225,19 +318,27 @@ namespace Sunvoltum {
     {
         if (!m_impl || !m_impl->initialized) return;
 
-        // Отписываемся от ChildAdded до очистки тел
         m_impl->workspaceChildToken.Disconnect();
         m_impl->containerTokens.clear();
-
-        // Отписываемся от всех property-подписок
         m_impl->bodyTokens.clear();
         m_impl->gravityToken.Disconnect();
         m_impl->pendingTeleports.clear();
         m_impl->bodyOrder.clear();
 
-        // Очищаем Motor6D-соединения
-        m_impl->motors.clear();
-        m_impl->motorOrder.clear();
+        m_impl->jointTokens.clear();
+        m_impl->humanoids.clear();
+
+        // Освобождаем PxJoint'ы до очистки тел
+        for (auto& [key, entry] : m_impl->joints)
+        {
+            if (entry.joint)
+            {
+                entry.joint->release();
+                entry.joint = nullptr;
+            }
+        }
+        m_impl->joints.clear();
+        m_impl->jointOrder.clear();
 
         for (auto& [key, body] : m_impl->bodies)
             body.Shutdown(m_impl->world.GetScene());
@@ -256,21 +357,22 @@ namespace Sunvoltum {
     }
 
     // -----------------------------------------------------------------------
-    // Step: SyncIn -> simulate -> SyncOut
+    // Step: SyncIn -> SyncJointsDrive -> simulate -> SyncOut -> SyncJointsRead
     // -----------------------------------------------------------------------
     void PhysicsBridge::Step(float dt)
     {
         if (!m_impl->initialized) return;
 
         m_impl->SyncIn();
+        m_impl->SyncHumanoidTurn(dt); // поворот HRP к MoveDirection — до симуляции
+        m_impl->SyncJointsDrive();
         m_impl->world.Step(dt);
         m_impl->SyncOut();
-        m_impl->SyncMotors(); // обновляем конечности после физики
+        m_impl->SyncJointsRead();
     }
 
     // -----------------------------------------------------------------------
-    // RegisterBodyRecursive — рекурсивно обходит контейнер и регистрирует
-    // ShapePart'ы как физические тела.
+    // RegisterBodyRecursive
     // -----------------------------------------------------------------------
     void PhysicsBridge::Impl::RegisterBodyRecursive(Instance* inst)
     {
@@ -278,16 +380,22 @@ namespace Sunvoltum {
 
         const int8_t cls = inst->GetClassId();
 
-        if (cls == Classes::ShapePart::ClassId)
+        if (Classes::IsBasePart(cls))
         {
             RegisterBody(inst);
             return;
         }
 
-        // Motor6D — регистрируем соединение, не физическое тело
-        if (cls == Classes::CLASS_MOTOR6D)
+        if (Classes::IsJoint(cls))
         {
-            RegisterMotor(inst);
+            RegisterJoint(inst);
+            return;
+        }
+
+        // Humanoid — не BasePart и не Joint, но нужно зарегистрировать
+        if (cls == Classes::CLASS_HUMANOID)
+        {
+            RegisterHumanoid(inst);
             return;
         }
 
@@ -300,9 +408,33 @@ namespace Sunvoltum {
             RegisterBodyRecursive(child.get());
 
         containerTokens.push_back(inst->SubscribeChildAdded(
-            [this](Instance& child)
+            [this, inst](Instance& child)
             {
                 RegisterBodyRecursive(&child);
+
+                // Если в Model добавляется Humanoid — ищем HumanoidRootPart среди
+                // уже зарегистрированных братьев и применяем LockUpright.
+                if (child.GetClassId() == Classes::CLASS_HUMANOID &&
+                    inst->GetClassId() == Classes::CLASS_MODEL)
+                {
+                    for (auto& sibling : inst->GetChildren())
+                    {
+                        if (sibling->GetName() == "HumanoidRootPart" &&
+                            Classes::IsBasePart(sibling->GetClassId()))
+                        {
+                            uintptr_t hrpKey = reinterpret_cast<uintptr_t>(sibling.get());
+                            auto it = bodies.find(hrpKey);
+                            if (it != bodies.end() && it->second.IsInitialized() &&
+                                !it->second.IsAnchored())
+                            {
+                                it->second.LockUpright();
+                                std::cout << "[PhysicsBridge] LockUpright applied via"
+                                             " late Humanoid to HumanoidRootPart\n";
+                            }
+                        }
+                    }
+                    RegisterHumanoid(&child);
+                }
             }));
     }
 
@@ -318,18 +450,41 @@ namespace Sunvoltum {
             return;
         }
 
-        // Рекурсивно регистрируем всё дерево Workspace
+        std::cout << "[PhysicsBridge] SubscribeWorkspace: ws.children="
+                  << ws->GetChildren().size() << "\n";
+
         RegisterBodyRecursive(ws);
     }
 
     // -----------------------------------------------------------------------
-    // RegisterBody — создать PhysicsBody для ShapePart и подписаться.
-    // Вызывается из SubscribeWorkspace и ChildAdded-коллбэка.
+    // FindHumanoidInParent — ищет Humanoid-инстанс среди братьев inst.
+    //
+    // Используется в RegisterBody: если Part с именем "HumanoidRootPart"
+    // регистрируется в Model, которая содержит Humanoid, значит этот Part
+    // является корневым телом персонажа и должен быть заблокирован по осям X/Z.
+    // -----------------------------------------------------------------------
+    static Instance* FindHumanoidInParent(Instance* inst)
+    {
+        if (!inst) return nullptr;
+        InstanceParent* parent = inst->GetParent();
+        if (!parent) return nullptr;
+        Instance* parentInst = dynamic_cast<Instance*>(parent);
+        if (!parentInst || parentInst->GetClassId() != Classes::CLASS_MODEL) return nullptr;
+        for (auto& child : parentInst->GetChildren())
+        {
+            if (child->GetClassId() == Classes::CLASS_HUMANOID)
+                return child.get();
+        }
+        return nullptr;
+    }
+
+    // -----------------------------------------------------------------------
+    // RegisterBody
     // -----------------------------------------------------------------------
     void PhysicsBridge::Impl::RegisterBody(Instance* inst)
     {
         uintptr_t key = reinterpret_cast<uintptr_t>(inst);
-        if (bodies.count(key)) return; // уже зарегистрирован
+        if (bodies.count(key)) return;
 
         px::PxPhysics* physics = manager.GetPhysics();
         px::PxScene*   scene   = world.GetScene();
@@ -340,37 +495,37 @@ namespace Sunvoltum {
         bool    anchored  = false;
         bool    canCollide = true;
 
-        auto* cfProp = inst->GetProperty(Classes::ShapePart::CFrame);
+        auto* cfProp = inst->GetProperty(Classes::BasePart::CFrame);
         if (cfProp && cfProp->Type == PropertyType::CFrame)
             cf = cfProp->Value.AsCFrame;
 
-        auto* sizeProp = inst->GetProperty(Classes::ShapePart::Size);
+        auto* sizeProp = inst->GetProperty(Classes::BasePart::Size);
         if (sizeProp && sizeProp->Type == PropertyType::Vector3)
             size = sizeProp->Value.AsVector3;
 
-        auto* shapeProp = inst->GetProperty(Classes::ShapePart::Shape);
+        auto* shapeProp = inst->GetProperty(Classes::BasePart::Shape);
         if (shapeProp && shapeProp->Type == PropertyType::Shape)
             shape = shapeProp->Value.AsShape;
 
-        auto* anchorProp = inst->GetProperty(Classes::ShapePart::Anchored);
+        auto* anchorProp = inst->GetProperty(Classes::BasePart::Anchored);
         if (anchorProp && anchorProp->Type == PropertyType::Bool)
             anchored = anchorProp->Value.AsBool;
 
-        auto* canCollideProp = inst->GetProperty(Classes::ShapePart::CanCollide);
+        auto* canCollideProp = inst->GetProperty(Classes::BasePart::CanCollide);
         if (canCollideProp && canCollideProp->Type == PropertyType::Bool)
             canCollide = canCollideProp->Value.AsBool;
 
         PhysicsBody body;
-        if (!body.Init(physics, scene, cf, size, shape, anchored, canCollide))
+        if (!body.Init(physics, scene, cf, size, shape, anchored, canCollide, false))
             return;
 
         if (!anchored)
         {
-            auto* posVelProp = inst->GetProperty(Classes::ShapePart::PosVelocity);
+            auto* posVelProp = inst->GetProperty(Classes::BasePart::PosVelocity);
             if (posVelProp && posVelProp->Type == PropertyType::Vector3)
                 body.SetLinearVelocity(posVelProp->Value.AsVector3);
 
-            auto* rotVelProp = inst->GetProperty(Classes::ShapePart::RotVelocity);
+            auto* rotVelProp = inst->GetProperty(Classes::BasePart::RotVelocity);
             if (rotVelProp && rotVelProp->Type == PropertyType::Vector3)
                 body.SetAngularVelocity(rotVelProp->Value.AsVector3);
         }
@@ -379,64 +534,29 @@ namespace Sunvoltum {
         bodyOrder.push_back(key);
 
         SubscribeBody(inst);
+
+        // Если это HumanoidRootPart и в родительской Model есть Humanoid —
+        // автоматически блокируем вращение по осям X/Z (персонаж не заваливается).
+        if (inst->GetName() == "HumanoidRootPart" && !anchored)
+        {
+            if (FindHumanoidInParent(inst))
+            {
+                auto it = bodies.find(key);
+                if (it != bodies.end())
+                {
+                    it->second.LockUpright();
+                    std::cout << "[PhysicsBridge] LockUpright applied to HumanoidRootPart: "
+                              << inst->GetName() << "\n";
+                }
+            }
+        }
+
+        std::cout << "[PhysicsBridge] RegisterBody: " << inst->GetName()
+                  << " anchored=" << anchored << "\n";
     }
 
     // -----------------------------------------------------------------------
-    // RegisterMotor — зарегистрировать Motor6D-соединение.
-    // Читает Part0/Part1 и подписывается на изменения C0, C1, Part0, Part1.
-    // -----------------------------------------------------------------------
-    void PhysicsBridge::Impl::RegisterMotor(Instance* inst)
-    {
-        uintptr_t key = reinterpret_cast<uintptr_t>(inst);
-        if (motors.count(key)) return; // уже зарегистрирован
-
-        Motor6DEntry entry;
-        entry.motorInst = inst;
-
-        // Читаем Part0 и Part1 из свойств
-        auto* p0prop = inst->GetProperty(Classes::Motor6D::Part0);
-        if (p0prop && p0prop->Type == PropertyType::InstanceRef)
-            entry.part0 = p0prop->Value.AsInstanceRef;
-
-        auto* p1prop = inst->GetProperty(Classes::Motor6D::Part1);
-        if (p1prop && p1prop->Type == PropertyType::InstanceRef)
-            entry.part1 = p1prop->Value.AsInstanceRef;
-
-        // Подписка на смену Part0
-        entry.part0Token = PropertyManager::Get().Subscribe(
-            inst, Classes::Motor6D::Part0,
-            [this, key](const PropertyValue& val)
-            {
-                auto it = motors.find(key);
-                if (it == motors.end()) return;
-                it->second.part0 = (val.Type == PropertyType::InstanceRef)
-                                   ? val.Value.AsInstanceRef : nullptr;
-            });
-
-        // Подписка на смену Part1
-        entry.part1Token = PropertyManager::Get().Subscribe(
-            inst, Classes::Motor6D::Part1,
-            [this, key](const PropertyValue& val)
-            {
-                auto it = motors.find(key);
-                if (it == motors.end()) return;
-                it->second.part1 = (val.Type == PropertyType::InstanceRef)
-                                   ? val.Value.AsInstanceRef : nullptr;
-            });
-
-        // C0 и C1 читаются напрямую из Instance каждый кадр в SyncOut —
-        // подписки нужны только если хочется реагировать немедленно.
-        // Для простоты используем polling в SyncOut, токены оставляем пустыми.
-
-        motors.emplace(key, std::move(entry));
-        motorOrder.push_back(key);
-
-        std::cout << "[PhysicsBridge] Motor6D registered: " << inst->GetName() << "\n";
-    }
-
-    // -----------------------------------------------------------------------
-    // SubscribeBody — подписки на редко меняющиеся свойства тела.
-    // Velocity намеренно не здесь — она меняется каждый тик (feedback loop).
+    // SubscribeBody
     // -----------------------------------------------------------------------
     void PhysicsBridge::Impl::SubscribeBody(Instance* inst)
     {
@@ -446,9 +566,8 @@ namespace Sunvoltum {
         px::PxPhysics* physics = manager.GetPhysics();
         px::PxScene*   scene   = world.GetScene();
 
-        // Anchored
         subs.anchored = PropertyManager::Get().Subscribe(
-            inst, Classes::ShapePart::Anchored,
+            inst, Classes::BasePart::Anchored,
             [this, key, physics, scene](const PropertyValue& val)
             {
                 if (val.Type != PropertyType::Bool) return;
@@ -459,9 +578,8 @@ namespace Sunvoltum {
                     it->second.SetAnchored(nowAnchored, physics, scene);
             });
 
-        // CanCollide
         subs.canCollide = PropertyManager::Get().Subscribe(
-            inst, Classes::ShapePart::CanCollide,
+            inst, Classes::BasePart::CanCollide,
             [this, key](const PropertyValue& val)
             {
                 if (val.Type != PropertyType::Bool) return;
@@ -470,23 +588,22 @@ namespace Sunvoltum {
                 it->second.SetCanCollide(val.Value.AsBool);
             });
 
-        // CFrame — телепорт (игнорируется если пишет SyncOut)
         subs.cframe = PropertyManager::Get().Subscribe(
-            inst, Classes::ShapePart::CFrame,
+            inst, Classes::BasePart::CFrame,
             [this, key](const PropertyValue& val)
             {
                 if (inSyncOut) return;
                 if (val.Type != PropertyType::CFrame) return;
                 auto it = bodies.find(key);
                 if (it == bodies.end()) return;
+                if (it->second.IsKinematic()) return;
                 it->second.SetCFrame(val.Value.AsCFrame);
                 if (!it->second.IsAnchored())
                     pendingTeleports.insert(key);
             });
 
-        // Size
         subs.size = PropertyManager::Get().Subscribe(
-            inst, Classes::ShapePart::Size,
+            inst, Classes::BasePart::Size,
             [this, key](const PropertyValue& val)
             {
                 if (val.Type != PropertyType::Vector3) return;
@@ -495,9 +612,8 @@ namespace Sunvoltum {
                 it->second.Resize(val.Value.AsVector3);
             });
 
-        // Shape
         subs.shape = PropertyManager::Get().Subscribe(
-            inst, Classes::ShapePart::Shape,
+            inst, Classes::BasePart::Shape,
             [this, key, physics, scene](const PropertyValue& val)
             {
                 if (val.Type != PropertyType::Shape) return;
@@ -508,10 +624,302 @@ namespace Sunvoltum {
     }
 
     // -----------------------------------------------------------------------
-    // SyncIn — только velocity sync для dynamic тел.
+    // CreateJointConstraint — создаёт PhysX-сустав нужного типа.
     //
-    // Регистрация новых тел полностью вынесена в RegisterBody / SubscribeWorkspace.
-    // Никакого обхода дерева здесь нет.
+    // Диспетчер по classId:
+    //   CLASS_WELD    → PxFixedJoint   (жёсткое соединение)
+    //   CLASS_MOTOR6D → PxD6Joint      (вращательный привод по оси eTWIST)
+    //
+    // Возвращает базовый PxJoint* (владение передаётся JointEntry).
+    // -----------------------------------------------------------------------
+    static px::PxJoint* CreateJointConstraint(
+        int8_t classId,
+        px::PxPhysics* physics,
+        px::PxRigidActor* actor0, const CFrame& cf0, const CFrame& c0,
+        px::PxRigidActor* actor1, const CFrame& c1)
+    {
+        using namespace Classes;
+
+        if (classId == CLASS_WELD)
+        {
+            // Weld → PxFixedJoint
+            return CreateFixedJoint(physics, actor0, cf0, c0, actor1, c1);
+        }
+
+        if (classId == CLASS_MOTOR6D)
+        {
+            // Motor6D → PxD6Joint с velocity drive по оси eTWIST.
+            // cf0 не нужен: local frames уже кодируют attachment в пространстве акторов.
+            return CreateMotorJoint(physics, actor0, c0, actor1, c1);
+        }
+
+        return nullptr;
+    }
+
+    // -----------------------------------------------------------------------
+    // RegisterJoint — регистрирует любой Joint-инстанс (Weld, Motor6D, ...).
+    //
+    // Создаёт соответствующий PhysX-сустав через CreateJointConstraint.
+    // Part0 и Part1 остаются dynamic телами — гравитация работает на обоих,
+    // ноги стула касаются пола и передают constraint через сустав на сидение.
+    // Коллизии между Part0 и Part1 отключены на уровне сустава.
+    // -----------------------------------------------------------------------
+    void PhysicsBridge::Impl::RegisterJoint(Instance* inst)
+    {
+        uintptr_t key = reinterpret_cast<uintptr_t>(inst);
+        if (joints.count(key)) return;
+
+        const int8_t classId = inst->GetClassId();
+
+        JointEntry entry;
+        entry.jointInst = inst;
+
+        auto* p0prop = inst->GetProperty(Classes::JointInstance::Part0);
+        if (p0prop && p0prop->Type == PropertyType::InstanceRef)
+            entry.part0 = p0prop->Value.AsInstanceRef;
+
+        auto* p1prop = inst->GetProperty(Classes::JointInstance::Part1);
+        if (p1prop && p1prop->Type == PropertyType::InstanceRef)
+            entry.part1 = p1prop->Value.AsInstanceRef;
+
+        std::cout << "[PhysicsBridge] RegisterJoint (" << inst->GetName()
+                  << "): Part0=" << (entry.part0 ? entry.part0->GetName() : "null")
+                  << " Part1=" << (entry.part1 ? entry.part1->GetName() : "null")
+                  << "\n";
+
+        // Создаём PhysX-сустав если оба тела зарегистрированы.
+        if (entry.part0 && entry.part1)
+        {
+            uintptr_t p0key = reinterpret_cast<uintptr_t>(entry.part0);
+            uintptr_t p1key = reinterpret_cast<uintptr_t>(entry.part1);
+            auto b0it = bodies.find(p0key);
+            auto b1it = bodies.find(p1key);
+
+            if (b0it != bodies.end() && b0it->second.IsInitialized() &&
+                b1it != bodies.end() && b1it->second.IsInitialized())
+            {
+                static const CFrame kIdentity = CFrame::FromPosition(0.0f, 0.0f, 0.0f);
+                CFrame cf0 = kIdentity, c0 = kIdentity, c1 = kIdentity;
+
+                auto* cf0prop = entry.part0->GetProperty(Classes::BasePart::CFrame);
+                if (cf0prop && cf0prop->Type == PropertyType::CFrame)
+                    cf0 = cf0prop->Value.AsCFrame;
+
+                auto* c0prop = inst->GetProperty(Classes::JointInstance::C0);
+                if (c0prop && c0prop->Type == PropertyType::CFrame)
+                    c0 = c0prop->Value.AsCFrame;
+                auto* c1prop = inst->GetProperty(Classes::JointInstance::C1);
+                if (c1prop && c1prop->Type == PropertyType::CFrame)
+                    c1 = c1prop->Value.AsCFrame;
+
+                entry.joint = CreateJointConstraint(
+                    classId,
+                    manager.GetPhysics(),
+                    b0it->second.GetActor(), cf0, c0,
+                    b1it->second.GetActor(), c1
+                );
+
+                if (entry.joint)
+                    std::cout << "[PhysicsBridge] RegisterJoint: PxJoint created for "
+                              << inst->GetName() << "\n";
+                else
+                    std::cerr << "[PhysicsBridge] RegisterJoint: joint creation failed for "
+                              << inst->GetName() << "\n";
+            }
+            else
+            {
+                std::cout << "[PhysicsBridge] RegisterJoint: bodies not ready for "
+                          << inst->GetName()
+                          << " b0=" << (b0it != bodies.end())
+                          << " b1=" << (b1it != bodies.end()) << "\n";
+            }
+        }
+
+        joints.emplace(key, std::move(entry));
+        jointOrder.push_back(key);
+
+        SubscribeJoint(inst);
+    }
+
+    // -----------------------------------------------------------------------
+    // SubscribeJoint — реактивные подписки на Part0, Part1, C0, C1, Enabled.
+    //
+    // Единый для всех типов суставов: при смене Part1 пересоздаём сустав
+    // через тот же диспетчер CreateJointConstraint, который знает classId.
+    // -----------------------------------------------------------------------
+    void PhysicsBridge::Impl::SubscribeJoint(Instance* inst)
+    {
+        uintptr_t key = reinterpret_cast<uintptr_t>(inst);
+        auto& subs = jointTokens[key];
+
+        subs.part0 = PropertyManager::Get().Subscribe(
+            inst, Classes::JointInstance::Part0,
+            [this, key](const PropertyValue& val)
+            {
+                auto it = joints.find(key);
+                if (it == joints.end()) return;
+                it->second.part0 = (val.Type == PropertyType::InstanceRef)
+                                   ? val.Value.AsInstanceRef : nullptr;
+            });
+
+        subs.part1 = PropertyManager::Get().Subscribe(
+            inst, Classes::JointInstance::Part1,
+            [this, key](const PropertyValue& val)
+            {
+                auto it = joints.find(key);
+                if (it == joints.end()) return;
+
+                // Освобождаем старый joint перед сменой Part1
+                if (it->second.joint)
+                {
+                    it->second.joint->release();
+                    it->second.joint = nullptr;
+                }
+
+                it->second.part1 = (val.Type == PropertyType::InstanceRef)
+                                   ? val.Value.AsInstanceRef : nullptr;
+
+                // Пересоздаём joint если оба тела готовы
+                Instance* newPart1  = it->second.part1;
+                Instance* newPart0  = it->second.part0;
+                Instance* jointInst = it->second.jointInst;
+                if (!newPart0 || !newPart1) return;
+
+                uintptr_t p0key = reinterpret_cast<uintptr_t>(newPart0);
+                uintptr_t p1key = reinterpret_cast<uintptr_t>(newPart1);
+                auto b0it = bodies.find(p0key);
+                auto b1it = bodies.find(p1key);
+
+                if (b0it != bodies.end() && b0it->second.IsInitialized() &&
+                    b1it != bodies.end() && b1it->second.IsInitialized())
+                {
+                    static const CFrame kIdentity = CFrame::FromPosition(0.0f, 0.0f, 0.0f);
+                    CFrame cf0 = kIdentity, c0 = kIdentity, c1 = kIdentity;
+
+                    auto* cf0prop = newPart0->GetProperty(Classes::BasePart::CFrame);
+                    if (cf0prop && cf0prop->Type == PropertyType::CFrame)
+                        cf0 = cf0prop->Value.AsCFrame;
+
+                    auto* c0prop = jointInst->GetProperty(Classes::JointInstance::C0);
+                    if (c0prop && c0prop->Type == PropertyType::CFrame)
+                        c0 = c0prop->Value.AsCFrame;
+                    auto* c1prop = jointInst->GetProperty(Classes::JointInstance::C1);
+                    if (c1prop && c1prop->Type == PropertyType::CFrame)
+                        c1 = c1prop->Value.AsCFrame;
+
+                    it->second.joint = CreateJointConstraint(
+                        jointInst->GetClassId(),
+                        manager.GetPhysics(),
+                        b0it->second.GetActor(), cf0, c0,
+                        b1it->second.GetActor(), c1
+                    );
+
+                    std::cout << "[PhysicsBridge] SubscribeJoint Part1 set: "
+                              << newPart1->GetName()
+                              << " joint=" << (it->second.joint ? "ok" : "fail") << "\n";
+                }
+            });
+
+        subs.c0 = PropertyManager::Get().Subscribe(
+            inst, Classes::JointInstance::C0,
+            [](const PropertyValue&) { /* PhysX solver читает C0/C1 через joint frames */ });
+
+        subs.c1 = PropertyManager::Get().Subscribe(
+            inst, Classes::JointInstance::C1,
+            [](const PropertyValue&) { /* PhysX solver читает C0/C1 через joint frames */ });
+
+        subs.enabled = PropertyManager::Get().Subscribe(
+            inst, Classes::JointInstance::Enabled,
+            [this, key](const PropertyValue& val)
+            {
+                // Включение/выключение сустава — снимаем/добавляем constraint в solver
+                if (val.Type != PropertyType::Bool) return;
+                auto it = joints.find(key);
+                if (it == joints.end() || !it->second.joint) return;
+                it->second.joint->setConstraintFlag(
+                    px::PxConstraintFlag::eDISABLE_CONSTRAINT, !val.Value.AsBool);
+            });
+    }
+
+    // -----------------------------------------------------------------------
+    // SyncJointsDrive — вызывается ДО world.Step().
+    //
+    // Для Motor6D: читает DesiredAngle и MaxVelocity, вычисляет DriveVelocity
+    // и применяет его в PxD6Joint. PhysX решает constraint в следующем шаге.
+    // -----------------------------------------------------------------------
+    void PhysicsBridge::Impl::SyncJointsDrive()
+    {
+        using namespace Classes;
+
+        for (uintptr_t key : jointOrder)
+        {
+            auto it = joints.find(key);
+            if (it == joints.end() || !it->second.joint) continue;
+
+            Instance* inst = it->second.jointInst;
+            if (!inst || inst->GetClassId() != CLASS_MOTOR6D) continue;
+
+            px::PxD6Joint* d6 = static_cast<px::PxD6Joint*>(it->second.joint);
+
+            // Проверяем Enabled — если выключен, останавливаем привод
+            auto* enProp = inst->GetProperty(JointInstance::Enabled);
+            if (enProp && enProp->Type == PropertyType::Bool && !enProp->Value.AsBool)
+            {
+                d6->setDriveVelocity(px::PxVec3(0.0f), px::PxVec3(0.0f));
+                continue;
+            }
+
+            auto* desiredProp = inst->GetProperty(Motor6D::DesiredAngle);
+            auto* maxVelProp  = inst->GetProperty(Motor6D::MaxVelocity);
+            if (!desiredProp || !maxVelProp) continue;
+
+            float desiredAngle = (desiredProp->Type == PropertyType::Float)
+                                 ? desiredProp->Value.AsFloat : 0.0f;
+            float maxVelocity  = (maxVelProp->Type == PropertyType::Float)
+                                 ? maxVelProp->Value.AsFloat : 0.0f;
+
+            // Читаем текущий угол из физики для расчёта знака
+            float currentAngle = d6->getTwistAngle();
+            float angleDiff    = desiredAngle - currentAngle;
+
+            float driveVel = 0.0f;
+            constexpr float kEpsilon = 1e-4f;
+            if (std::abs(angleDiff) > kEpsilon && maxVelocity > 0.0f)
+                driveVel = (angleDiff > 0.0f ? 1.0f : -1.0f) * maxVelocity;
+
+            // setDriveVelocity(linear, angular) — два PxVec3
+            // Угловая скорость по оси X (eTWIST)
+            d6->setDriveVelocity(px::PxVec3(0.0f), px::PxVec3(driveVel, 0.0f, 0.0f));
+        }
+    }
+
+    // -----------------------------------------------------------------------
+    // SyncJointsRead — вызывается ПОСЛЕ world.Step() и SyncOut().
+    //
+    // Для Motor6D: читает getTwistAngle() и записывает CurrentAngle в DataModel.
+    // Это значение реплицируется клиентам через ServerReplicator (reliable channel).
+    // -----------------------------------------------------------------------
+    void PhysicsBridge::Impl::SyncJointsRead()
+    {
+        using namespace Classes;
+
+        for (uintptr_t key : jointOrder)
+        {
+            auto it = joints.find(key);
+            if (it == joints.end() || !it->second.joint) continue;
+
+            Instance* inst = it->second.jointInst;
+            if (!inst || inst->GetClassId() != CLASS_MOTOR6D) continue;
+
+            px::PxD6Joint* d6 = static_cast<px::PxD6Joint*>(it->second.joint);
+            float currentAngle = d6->getTwistAngle();
+
+            inst->SetProperty(Motor6D::CurrentAngle, PropertyValue::Float(currentAngle));
+        }
+    }
+
+    // -----------------------------------------------------------------------
+    // SyncIn — velocity sync для dynamic тел
     // -----------------------------------------------------------------------
     void PhysicsBridge::Impl::SyncIn()
     {
@@ -521,30 +929,30 @@ namespace Sunvoltum {
             if (bodyIt == bodies.end()) continue;
 
             PhysicsBody& body = bodyIt->second;
-            if (body.IsAnchored()) continue;
+            if (body.IsAnchored())  continue;
+            if (body.IsKinematic()) continue;
 
-            // Velocity меняется каждый тик — поллинг дешевле чем callback
             Instance* inst = reinterpret_cast<Instance*>(key);
 
-            auto* posVelProp = inst->GetProperty(Classes::ShapePart::PosVelocity);
+            auto* posVelProp = inst->GetProperty(Classes::BasePart::PosVelocity);
             if (posVelProp && posVelProp->Type == PropertyType::Vector3)
                 body.SetLinearVelocity(posVelProp->Value.AsVector3);
 
-            auto* rotVelProp = inst->GetProperty(Classes::ShapePart::RotVelocity);
+            auto* rotVelProp = inst->GetProperty(Classes::BasePart::RotVelocity);
             if (rotVelProp && rotVelProp->Type == PropertyType::Vector3)
                 body.SetAngularVelocity(rotVelProp->Value.AsVector3);
         }
     }
 
     // -----------------------------------------------------------------------
-    // SyncOut -- PhysX -> DataModel for dynamic bodies.
-    //
-    // inSyncOut = true на время обхода: CFrame-callback в SubscribeBody
-    // видит этот флаг и не делает SetCFrame обратно в PhysX (избегаем цикла).
+    // SyncOut — PhysX → DataModel для dynamic тел
     // -----------------------------------------------------------------------
     void PhysicsBridge::Impl::SyncOut()
     {
         inSyncOut = true;
+
+        static int s_syncOutLog = 0;
+        const bool doLog = (s_syncOutLog < 5);
 
         for (uintptr_t key : bodyOrder)
         {
@@ -553,68 +961,31 @@ namespace Sunvoltum {
 
             PhysicsBody& body = bodyIt->second;
             if (!body.IsInitialized() || body.IsAnchored()) continue;
-            if (pendingTeleports.count(key))             continue;
+            if (pendingTeleports.count(key))                continue;
+            if (body.IsKinematic())                         continue;
 
             Instance* inst = reinterpret_cast<Instance*>(key);
 
-            inst->SetProperty(Classes::ShapePart::CFrame,
-                PropertyValue::CFrame(body.GetCFrame()));
-            inst->SetProperty(Classes::ShapePart::PosVelocity,
-                PropertyValue::Vector3(body.GetLinearVelocity()));
-            inst->SetProperty(Classes::ShapePart::RotVelocity,
-                PropertyValue::Vector3(body.GetAngularVelocity()));
+            CFrame  cf     = body.GetCFrame();
+            Vector3 linVel = body.GetLinearVelocity();
+            Vector3 angVel = body.GetAngularVelocity();
+
+            if (doLog && std::string(inst->GetName()).find("Chair") != std::string::npos)
+            {
+                std::cout << "[SyncOut] " << inst->GetName()
+                          << " physY=" << cf.Position.Y
+                          << " velY=" << linVel.Y << "\n";
+            }
+
+            inst->SetProperty(Classes::BasePart::CFrame,       PropertyValue::CFrame(cf));
+            inst->SetProperty(Classes::BasePart::PosVelocity,  PropertyValue::Vector3(linVel));
+            inst->SetProperty(Classes::BasePart::RotVelocity,  PropertyValue::Vector3(angVel));
         }
+
+        if (doLog) ++s_syncOutLog;
 
         inSyncOut = false;
         pendingTeleports.clear();
-    }
-
-    // -----------------------------------------------------------------------
-    // Motor6D: вычисляем и применяем мировой CFrame для Part1.
-    // Выполняется отдельным проходом после основного SyncOut.
-    //
-    // Формула: worldCF1 = Part0.CFrame * C0 * Inv(C1)
-    //
-    // Запись без silent=true: рендер подписан на ShapePart::CFrame через
-    // PropertyManager — без уведомления dirty-флаг меша не обновится
-    // и конечности не сдвинутся визуально.
-    //
-    // Цикла нет: конечности Anchored=true, PhysicsBody для них не создаётся,
-    // CFrame-callback из SubscribeBody для них не зарегистрирован.
-    // -----------------------------------------------------------------------
-    void PhysicsBridge::Impl::SyncMotors()
-    {
-        for (uintptr_t mkey : motorOrder)
-        {
-            auto mit = motors.find(mkey);
-            if (mit == motors.end()) continue;
-
-            Motor6DEntry& entry = mit->second;
-            if (!entry.part0 || !entry.part1) continue;
-
-            // Мировой CFrame Part0 из DataModel
-            const PropertyValue* cf0prop = entry.part0->GetProperty(Classes::ShapePart::CFrame);
-            if (!cf0prop || cf0prop->Type != PropertyType::CFrame) continue;
-            const CFrame& worldCF0 = cf0prop->Value.AsCFrame;
-
-            // C0 и C1 из мотора
-            CFrame c0 = CFrame::FromPosition(0.0f, 0.0f, 0.0f);
-            CFrame c1 = CFrame::FromPosition(0.0f, 0.0f, 0.0f);
-
-            const PropertyValue* c0prop = entry.motorInst->GetProperty(Classes::Motor6D::C0);
-            if (c0prop && c0prop->Type == PropertyType::CFrame)
-                c0 = c0prop->Value.AsCFrame;
-
-            const PropertyValue* c1prop = entry.motorInst->GetProperty(Classes::Motor6D::C1);
-            if (c1prop && c1prop->Type == PropertyType::CFrame)
-                c1 = c1prop->Value.AsCFrame;
-
-            // worldCF1 = worldCF0 * C0 * Inv(C1)
-            CFrame worldCF1 = worldCF0 * c0 * CFrameInverse(c1);
-
-            entry.part1->SetProperty(Classes::ShapePart::CFrame,
-                PropertyValue::CFrame(worldCF1));
-        }
     }
 
     // -----------------------------------------------------------------------
@@ -651,16 +1022,7 @@ namespace Sunvoltum {
     }
 
     // -----------------------------------------------------------------------
-    // Raycast -- cast a ray from origin in direction for up to maxDist studs.
-    //
-    // Uses PxScene::raycast with PxHitFlag::eDEFAULT (position + normal + distance).
-    // ignoreInst: if non-null, the PhysicsBody that belongs to this Instance
-    //             is filtered out so a body can ray-cast from inside itself.
-    //
-    // Typical use: ground check from the bottom of HumanoidRootPart.
-    //   origin    = hrp center - (0, halfHeight, 0)
-    //   direction = (0, -1, 0)
-    //   maxDist   = 0.1 studs
+    // Raycast
     // -----------------------------------------------------------------------
     RaycastResult PhysicsBridge::Raycast(const Vector3& origin,
                                          const Vector3& direction,
@@ -673,7 +1035,6 @@ namespace Sunvoltum {
         px::PxScene* scene = m_impl->world.GetScene();
         if (!scene) return result;
 
-        // Normalize direction
         px::PxVec3 dir(direction.X, direction.Y, direction.Z);
         float len = dir.magnitude();
         if (len < 1e-6f) return result;
@@ -681,23 +1042,16 @@ namespace Sunvoltum {
 
         px::PxVec3 orig(origin.X, origin.Y, origin.Z);
 
-        // Build filter data to optionally ignore the caller's own actor
         px::PxQueryFilterData filterData;
         filterData.flags = px::PxQueryFlag::eSTATIC | px::PxQueryFlag::eDYNAMIC;
 
-        // Custom filter callback to skip ignoreInst's actor.
-        // preFilter runs before the intersection test and returns eNONE to skip.
-        // postFilter is required by the interface but never called since we use
-        // only ePREFILTER (not ePOSTFILTER) — it just returns eBLOCK as a no-op.
         struct IgnoreActorFilter : px::PxQueryFilterCallback
         {
             px::PxRigidActor* ignored = nullptr;
 
             px::PxQueryHitType::Enum preFilter(
-                const px::PxFilterData&,
-                const px::PxShape*,
-                const px::PxRigidActor* actor,
-                px::PxHitFlags&) override
+                const px::PxFilterData&, const px::PxShape*,
+                const px::PxRigidActor* actor, px::PxHitFlags&) override
             {
                 if (ignored && actor == ignored)
                     return px::PxQueryHitType::eNONE;
@@ -705,16 +1059,13 @@ namespace Sunvoltum {
             }
 
             px::PxQueryHitType::Enum postFilter(
-                const px::PxFilterData&,
-                const px::PxQueryHit&,
-                const px::PxShape*,
-                const px::PxRigidActor*) override
+                const px::PxFilterData&, const px::PxQueryHit&,
+                const px::PxShape*, const px::PxRigidActor*) override
             {
                 return px::PxQueryHitType::eBLOCK;
             }
         } filter;
 
-        // Resolve the actor to ignore
         if (ignoreInst)
         {
             uintptr_t key = reinterpret_cast<uintptr_t>(ignoreInst);
@@ -730,14 +1081,12 @@ namespace Sunvoltum {
         {
             filterData.flags |= px::PxQueryFlag::ePREFILTER;
             status = scene->raycast(orig, dir, maxDist, hit,
-                                    px::PxHitFlag::eDEFAULT,
-                                    filterData, &filter);
+                                    px::PxHitFlag::eDEFAULT, filterData, &filter);
         }
         else
         {
             status = scene->raycast(orig, dir, maxDist, hit,
-                                    px::PxHitFlag::eDEFAULT,
-                                    filterData);
+                                    px::PxHitFlag::eDEFAULT, filterData);
         }
 
         if (status && hit.hasBlock)
@@ -752,6 +1101,145 @@ namespace Sunvoltum {
                                       hit.block.normal.z);
         }
         return result;
+    }
+
+    // -----------------------------------------------------------------------
+    // RegisterHumanoid — регистрирует Humanoid и находит его HumanoidRootPart.
+    //
+    // Вызывается из RegisterBodyRecursive когда обходим дерево, или из
+    // SubscribeChildAdded когда Humanoid добавляется в Model позже.
+    // Инициализирует FacingYaw из текущей ориентации HRP (если уже есть CFrame).
+    // -----------------------------------------------------------------------
+    void PhysicsBridge::Impl::RegisterHumanoid(Instance* humanoidInst)
+    {
+        if (!humanoidInst) return;
+
+        uintptr_t key = reinterpret_cast<uintptr_t>(humanoidInst);
+        if (humanoids.count(key)) return;
+
+        // Ищем HumanoidRootPart среди братьев (дети родительской Model)
+        Instance* hrpInst = nullptr;
+        InstanceParent* parent = humanoidInst->GetParent();
+        if (parent)
+        {
+            Instance* parentInst = dynamic_cast<Instance*>(parent);
+            if (parentInst && parentInst->GetClassId() == Classes::CLASS_MODEL)
+            {
+                for (auto& child : parentInst->GetChildren())
+                {
+                    if (child->GetName() == "HumanoidRootPart" &&
+                        Classes::IsBasePart(child->GetClassId()))
+                    {
+                        hrpInst = child.get();
+                        break;
+                    }
+                }
+            }
+        }
+
+        HumanoidEntry entry;
+        entry.humanoidInst = humanoidInst;
+        entry.hrpInst      = hrpInst;
+        entry.facingYaw    = 0.0f;
+
+        // Инициализируем facingYaw из текущей ориентации HRP
+        if (hrpInst)
+        {
+            auto* cfProp = hrpInst->GetProperty(Classes::BasePart::CFrame);
+            if (cfProp && cfProp->Type == PropertyType::CFrame)
+            {
+                // Извлекаем yaw из матрицы: atan2(R02, R22) — по формуле ToEuler
+                const Matrix3x3& rot = cfProp->Value.AsCFrame.Rotation;
+                entry.facingYaw = std::atan2(rot.R02, rot.R22);
+            }
+        }
+
+        humanoids.emplace(key, std::move(entry));
+
+        std::cout << "[PhysicsBridge] RegisterHumanoid: "
+                  << humanoidInst->GetName()
+                  << " hrp=" << (hrpInst ? hrpInst->GetName() : "null")
+                  << " facingYaw=" << entry.facingYaw << "\n";
+    }
+
+    // -----------------------------------------------------------------------
+    // SyncHumanoidTurn — плавно поворачивает HRP в сторону MoveDirection.
+    //
+    // Алгоритм из main.cpp:
+    //   1. Читаем MoveDirection из Humanoid.
+    //   2. Если есть движение — вычисляем targetYaw = atan2(dx, dz).
+    //   3. Интерполируем facingYaw → targetYaw со скоростью TURN_SPEED рад/с.
+    //   4. Записываем новый CFrame в HRP: позиция из физики, ротация = FromEuler(0, facingYaw, 0).
+    //   5. Обновляем Humanoid::FacingYaw для репликации на клиент.
+    //
+    // Вызывается в Step() между SyncIn и world.Step — PhysX увидит правильный
+    // поворот уже в текущем шаге симуляции.
+    // -----------------------------------------------------------------------
+    void PhysicsBridge::Impl::SyncHumanoidTurn(float dt)
+    {
+        using H  = Classes::Humanoid;
+        using BP = Classes::BasePart;
+
+        constexpr float TURN_SPEED = 14.0f; // рад/с — из main.cpp
+
+        for (auto& [key, entry] : humanoids)
+        {
+            Instance* humanoid = entry.humanoidInst;
+            Instance* hrp      = entry.hrpInst;
+            if (!humanoid || !hrp) continue;
+
+            // Читаем Health — не крутим мёртвого персонажа
+            auto* healthProp = humanoid->GetProperty(H::Health);
+            if (healthProp && healthProp->Type == PropertyType::Float &&
+                healthProp->Value.AsFloat <= 0.0f)
+                continue;
+
+            // Читаем MoveDirection
+            auto* mdProp = humanoid->GetProperty(H::MoveDirection);
+            if (!mdProp || mdProp->Type != PropertyType::Vector3) continue;
+            const Vector3& md = mdProp->Value.AsVector3;
+
+            float moveLen = std::sqrt(md.X * md.X + md.Z * md.Z);
+            if (moveLen < 1e-4f) continue; // стоит — не трогаем поворот
+
+            // Целевой yaw из вектора движения
+            float targetYaw = std::atan2(md.X, md.Z);
+
+            // Кратчайший путь через окружность
+            float diff = targetYaw - entry.facingYaw;
+            while (diff >  3.14159265f) diff -= 2.0f * 3.14159265f;
+            while (diff < -3.14159265f) diff += 2.0f * 3.14159265f;
+
+            float step = TURN_SPEED * dt;
+            if (std::abs(diff) <= step)
+                entry.facingYaw = targetYaw;
+            else
+                entry.facingYaw += (diff > 0.0f ? step : -step);
+
+            // Читаем текущую позицию HRP из DataModel (SyncIn уже применил физику)
+            auto* cfProp = hrp->GetProperty(BP::CFrame);
+            if (!cfProp || cfProp->Type != PropertyType::CFrame) continue;
+
+            // Строим новый CFrame: позиция физики + чистая Y-ротация
+            CFrame newCF(
+                cfProp->Value.AsCFrame.Position,
+                Matrix3x3::FromEuler(0.0f, entry.facingYaw, 0.0f)
+            );
+
+            // Записываем silent=true — не уведомляем ServerReplicator лишний раз
+            // (CFrame пойдёт через SyncOut в следующем тике как обычно)
+            hrp->SetProperty(BP::CFrame, PropertyValue::CFrame(newCF), false, true);
+
+            // Физически применяем поворот в PhysX
+            uintptr_t hrpKey = reinterpret_cast<uintptr_t>(hrp);
+            auto bodyIt = bodies.find(hrpKey);
+            if (bodyIt != bodies.end() && bodyIt->second.IsInitialized())
+                bodyIt->second.SetCFrame(newCF);
+
+            // Обновляем FacingYaw в DataModel для репликации
+            humanoid->SetProperty(H::FacingYaw,
+                PropertyValue::Float(entry.facingYaw));
+        }
     }
 
 } // namespace Sunvoltum

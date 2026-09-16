@@ -1,5 +1,7 @@
 #pragma once
 
+#include "../LibSunvoltum.h"
+
 namespace Sunvoltum {
 
     class DataModel;
@@ -9,7 +11,7 @@ namespace Sunvoltum {
     // Runtime не знает про конкретный RenderBridge, MeturmRender или окно —
     // только этот интерфейс. Реализуется в LibSunvoltumRender.
     // -------------------------------------------------------------------------
-    class IRenderBridge
+    class LibSunvoltum IRenderBridge
     {
     public:
         virtual ~IRenderBridge() = default;
@@ -33,8 +35,11 @@ namespace Sunvoltum {
         virtual int GetWindowWidth()  const = 0;
         virtual int GetWindowHeight() const = 0;
 
-        // Переместить курсор в экранные координаты
+        // Переместить системный курсор в экранные координаты
         virtual void SetCursorPosition(float x, float y) = 0;
+
+        // Задать позицию курсора движка
+        virtual void SetEngineCursorPosition(float x, float y) = 0;
     };
 
 } // namespace Sunvoltum

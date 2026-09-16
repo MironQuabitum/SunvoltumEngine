@@ -38,6 +38,11 @@
 #include "../DataModel/Instance.h"
 #include "../DataModel/InstanceParent.h"
 #include "../DataModel/PropertyManager.h"
+#include "../DataModel/InstanceClasses/BasePart.h"
+#include "../DataModel/InstanceClasses/JointInstance.h"
+#include "../DataModel/InstanceClasses/Motor6D.h"
+#include "../Types/Vector3.h"
+#include "../Types/CFrame.h"
 #include "NetworkPacket.h"
 #include "NetworkServer.h"
 
@@ -84,8 +89,14 @@ namespace Net {
         {
             size_t operator()(const PropKey& k) const
             {
-                return std::hash<uint64_t>()(
-                    (static_cast<uint64_t>(k.netId) << 8) | k.propId);
+                // Combine netId и propId через Murmur-inspired mix чтобы не терять
+                // верхние биты netId (прежний (netId << 8) | propId их обрезал).
+                size_t h = static_cast<size_t>(k.netId);
+                h ^= h >> 16;
+                h *= 0x45d9f3bULL;
+                h ^= h >> 16;
+                h ^= static_cast<size_t>(k.propId) * 0x9e3779b9ULL;
+                return h;
             }
         };
 
@@ -120,11 +131,11 @@ namespace Net {
                                   const PropertyValue& value,
                                   std::chrono::steady_clock::time_point sendTime);
 
-        // Является ли свойство высокочастотным (Unreliable канал)
-        static bool IsFrequentProperty(PropertyId propId);
+        // Является ли свойство высокочастотным для данного класса (Unreliable канал)
+        static bool IsFrequentProperty(int8_t classId, PropertyId propId);
 
         // Минимальный интервал отправки для свойства (мс)
-        static uint32_t GetRateMs(PropertyId propId);
+        static uint32_t GetRateMs(int8_t classId, PropertyId propId);
 
         static constexpr uint32_t RATE_DEFAULT_MS = 50; // 20 раз/сек
         static constexpr uint32_t RATE_PHYSICS_MS = 33; // ~30 раз/сек
@@ -146,7 +157,8 @@ namespace Net {
         {
             PropertyValue             lastValue;
             std::chrono::steady_clock::time_point lastSentTime;
-            bool                      dirty = false;
+            bool                      dirty   = false;
+            int8_t                    classId = 0; // classId источника — для GetRateMs
         };
         std::unordered_map<PropKey, PendingUpdate, PropKeyHash> m_pendingUpdates;
 
@@ -160,6 +172,8 @@ namespace Net {
 
         // Подписки на свойства объектов: netId → вектор PropertyToken
         std::unordered_map<InstanceNetId, std::vector<PropertyToken>> m_propTokens;
+
+        // NetworkOwner map убран — NetworkOwner система удалена.
 
         bool m_initialized = false;
     };

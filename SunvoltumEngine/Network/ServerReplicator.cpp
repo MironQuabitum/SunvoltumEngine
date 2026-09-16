@@ -3,6 +3,8 @@
 #include "../DataModel/InstanceRegistry.h"
 #include "../DataModel/InstanceClasses/ShapePart.h"
 #include "../DataModel/InstanceClasses/Lighting.h"
+#include "../DataModel/InstanceClasses/JointInstance.h"
+#include "NetworkClient.h"
 
 #include <iostream>
 
@@ -122,31 +124,59 @@ void ServerReplicator::RegisterRecursive(InstanceParent& node)
 }
 
 // ---------------------------------------------------------------------------
-// IsFrequentProperty
+// IsFrequentProperty — проверяет является ли свойство высокочастотным
+// для конкретного класса инстанса.
+//
+// ВАЖНО: propId числово совпадает у разных классов (например,
+//   BasePart::CFrame = 0 и JointInstance::Part0 = 0 — один индекс).
+// Поэтому проверка ОБЯЗАТЕЛЬНО учитывает classId, иначе Weld.Part0/Part1
+// ошибочно попадают в unreliable-канал вместо reliable.
 // ---------------------------------------------------------------------------
-bool ServerReplicator::IsFrequentProperty(PropertyId propId)
+bool ServerReplicator::IsFrequentProperty(int8_t classId, PropertyId propId)
 {
-    using SP = Sunvoltum::Classes::ShapePart;
+    using SP = Sunvoltum::Classes::BasePart;
     using LT = Sunvoltum::Classes::Lighting;
 
-    return propId == SP::CFrame       ||
-           propId == SP::PosVelocity  ||
-           propId == SP::RotVelocity  ||
-           propId == LT::ClockTime;
+    // Суставы: структурные свойства (Part0/Part1/C0/C1/Enabled) — reliable.
+    // Motor6D::CurrentAngle (индекс 7) меняется каждый тик — unreliable.
+    if (Classes::IsJoint(classId))
+    {
+        if (classId == Classes::CLASS_MOTOR6D &&
+            propId   == Classes::Motor6D::CurrentAngle)
+            return true; // unreliable+sequenced — часто меняется
+        return false;    // все остальные joint-свойства — reliable
+    }
+
+    // Для физических частей — CFrame, скорости горячие (unreliable+sequenced)
+    if (Classes::IsBasePart(classId))
+    {
+        return propId == SP::CFrame      ||
+               propId == SP::PosVelocity ||
+               propId == SP::RotVelocity;
+    }
+
+    // Lighting::ClockTime — горячее свойство
+    if (classId == Classes::Lighting::ClassId)
+        return propId == LT::ClockTime;
+
+    return false;
 }
 
 // ---------------------------------------------------------------------------
 // GetRateMs — минимальный интервал отправки для свойства
 // ---------------------------------------------------------------------------
-uint32_t ServerReplicator::GetRateMs(PropertyId propId)
+uint32_t ServerReplicator::GetRateMs(int8_t classId, PropertyId propId)
 {
-    using SP = Sunvoltum::Classes::ShapePart;
+    using SP = Sunvoltum::Classes::BasePart;
 
     // Физические тела обновляются на 240 Hz — ограничиваем до ~30 раз/сек
-    if (propId == SP::CFrame      ||
-        propId == SP::PosVelocity ||
-        propId == SP::RotVelocity)
-        return RATE_PHYSICS_MS; // 33 мс
+    if (Classes::IsBasePart(classId))
+    {
+        if (propId == SP::CFrame      ||
+            propId == SP::PosVelocity ||
+            propId == SP::RotVelocity)
+            return RATE_PHYSICS_MS; // 33 мс
+    }
 
     // ClockTime и другие частые свойства — 20 раз/сек
     return RATE_DEFAULT_MS; // 50 мс
@@ -162,11 +192,14 @@ void ServerReplicator::SubscribeProperties(Instance& inst)
     InstanceNetId netId = inst.GetNetId();
     if (netId == INVALID_INSTANCE_NET_ID) return;
 
+    const int8_t classId = inst.GetClassId();
+
     auto& tokens = m_propTokens[netId];
+    int subCount = 0;
 
     for (const auto& [propId, entry] : inst.GetProperties())
     {
-        if (IsFrequentProperty(propId))
+        if (IsFrequentProperty(classId, propId))
         {
             tokens.push_back(
                 PropertyManager::Get().Subscribe(&inst, propId,
@@ -184,7 +217,13 @@ void ServerReplicator::SubscribeProperties(Instance& inst)
                         BroadcastPropertyChanged(netId, propId, value);
                     }));
         }
+        ++subCount;
     }
+
+    std::cout << "[ServerReplicator] SubscribeProperties: " << inst.GetName()
+              << " netId=" << netId
+              << " classId=" << static_cast<int>(classId)
+              << " props=" << subCount << "\n";
 }
 
 // ---------------------------------------------------------------------------
@@ -282,12 +321,13 @@ void ServerReplicator::BroadcastPropertyChanged(InstanceNetId        netId,
 // ---------------------------------------------------------------------------
 // BroadcastPropertyUpdate — Unreliable + Sequenced + Rate-limited
 //
-// При вызове:
-//   - Если с последней отправки прошло >= GetRateMs(propId) → отправить сразу
-//   - Иначе → запомнить значение как dirty, отправить в Tick() когда истечёт
+// Только помечает значение как dirty — фактическая отправка происходит
+// в FlushPendingUpdates() внутри Tick().
 //
-// Это гарантирует что клиент всегда получит последнее значение,
-// но не чаще чем раз в GetRateMs миллисекунд.
+// Это гарантирует что все тела (Part0 + все Part1 одного Weld) отправляются
+// в одном Tick-проходе с одним общим «now», устраняя дрейф часов между
+// связанными телами который приводил к тому что ноги/спинка стула отставали
+// от сидения на один 33 мс интервал.
 // ---------------------------------------------------------------------------
 void ServerReplicator::BroadcastPropertyUpdate(InstanceNetId        netId,
                                                 PropertyId           propId,
@@ -296,25 +336,19 @@ void ServerReplicator::BroadcastPropertyUpdate(InstanceNetId        netId,
     if (m_readyPeers.empty()) return;
 
     PropKey key{ netId, propId };
-    auto now = std::chrono::steady_clock::now();
-    uint32_t rateMs = GetRateMs(propId);
 
     auto& pending = m_pendingUpdates[key];
-
-    // Всегда запоминаем последнее значение
     pending.lastValue = value;
     pending.dirty     = true;
 
-    // Проверяем: можно ли отправить прямо сейчас?
-    auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(
-        now - pending.lastSentTime).count();
-
-    if (static_cast<uint32_t>(elapsed) < rateMs)
-        return; // слишком рано — отправим в Tick()
-
-    // Отправляем немедленно
-    DoSendPropertyUpdate(key, pending.lastValue, now);
-    pending.dirty = false;
+    // Сохраняем classId инстанса — нужен для GetRateMs.
+    // Ищем только при первой записи (classId == 0 означает "не заполнено").
+    if (pending.classId == 0)
+    {
+        Instance* inst = InstanceRegistry::Get().Find(netId);
+        if (inst) pending.classId = inst->GetClassId();
+    }
+    // Отправка — только через FlushPendingUpdates в Tick().
 }
 
 // ---------------------------------------------------------------------------
@@ -358,7 +392,7 @@ void ServerReplicator::FlushPendingUpdates()
     {
         if (!pending.dirty) continue;
 
-        uint32_t rateMs = GetRateMs(key.propId);
+        uint32_t rateMs = GetRateMs(pending.classId, key.propId);
         auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(
             now - pending.lastSentTime).count();
 

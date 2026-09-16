@@ -21,9 +21,7 @@ namespace Sunvoltum {
     //
     // NetworkId — сквозной идентификатор подключённого клиента.
     // Сервер выдаёт его при установке соединения и записывает в
-    // свойство Player::NetworkId. Через этот же Id реализуется
-    // SetNetworkOwner(player): Instance помечается NetworkOwnerId = NetworkId
-    // игрока, и сервер знает чьи данные принимать для этого объекта.
+    // свойство Player::NetworkId.
 
     using NetworkId = uint32_t;
 

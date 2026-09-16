@@ -1,4 +1,4 @@
-﻿#include "BridgeCommon.h"
+#include "BridgeCommon.h"
 
 namespace Sunvoltum {
 
@@ -14,8 +14,8 @@ namespace Sunvoltum {
             int h = m_window->GetHeight();
             m_renderer->Resize(w, h);
             float aspect = static_cast<float>(w) / static_cast<float>(h);
-            m_camera->SetPerspective(m_camera->GetFOV(), aspect,
-                                     m_camera->GetNearZ(), m_camera->GetFarZ());
+            m_camera->SetPerspective(m_camera->GetFov(), aspect,
+                                     m_camera->GetNearPlane(), m_camera->GetFarPlane());
             m_window->ClearResizedFlag();
         }
 
@@ -25,6 +25,8 @@ namespace Sunvoltum {
     void RenderBridge::Frame(float deltaTime)
     {
         if (!m_initialized) return;
+
+        m_totalTime += deltaTime;
 
         SyncCamera();
         SyncLighting();
@@ -41,21 +43,16 @@ namespace Sunvoltum {
         // Меш луны — аналогично, противоположная сторона неба.
         if (m_moonMesh) m_renderer->RenderObject(*m_moonMesh, *m_camera);
 
-        SyncScene();
-        m_renderer->RenderSunLight(*m_sunLight);
+        SyncScene(deltaTime);
 
-        // Курсор — двигается за мышью когда не залочен
-        if (m_cursor)
+        // 2D Курсор движка поверх сцены (позиция задаётся программно, видимость не зависит от системного курсора)
+        if (m_cursor && m_window)
         {
             auto& input = m_window->GetInput();
-            if (!input.IsMouseLocked())
+            if (input.IsEngineCursorVisible() && m_cursor->IsVisible())
             {
-                m_cursor->SetPosition(
-                    static_cast<float>(input.GetMouseX()),
-                    static_cast<float>(input.GetMouseY())
-                );
+                m_renderer->RenderCursor(*m_cursor);
             }
-            m_renderer->RenderCursor(*m_cursor);
         }
 
         m_renderer->EndFrame();

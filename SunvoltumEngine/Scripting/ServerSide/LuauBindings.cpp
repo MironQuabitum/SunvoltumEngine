@@ -1,9 +1,12 @@
 // ServerSide/LuauBindings.cpp
-//
-// Вся реализация общих биндингов перенесена в Shared/SharedBindings.cpp
-// и Shared/LuauHelpers.cpp. Этот файл оставлен как placeholder для будущих
-// серверных расширений (например, серверные события, NetworkOwner и т.д.).
+// Серверные расширения биндингов Luau — зарезервировано для будущих биндингов.
 
 #include "LuauBindings.h"
 
-// Серверные расширения биндингов будут добавлены здесь.
+namespace Sunvoltum {
+namespace Scripting {
+namespace Server {
+
+} // namespace Server
+} // namespace Scripting
+} // namespace Sunvoltum

@@ -32,6 +32,7 @@
 #include <cstdint>
 #include <functional>
 
+#include "../LibSunvoltum.h"
 #include "../DataModel/PropertyId.h"
 #include "../DataModel/PropertyValue.h"
 #include "../DataModel/Instance.h"
@@ -50,7 +51,7 @@ namespace Net {
     // instToId — функция для преобразования Instance* → SerializeId.
     //            Может возвращать SERIALIZE_ID_NONE если объект не сериализуется.
     // -----------------------------------------------------------------------
-    void WritePropertyValue(
+    LibSunvoltum void WritePropertyValue(
         PacketWriter&                              pkt,
         PropertyId                                 propId,
         const PropertyValue&                       value,
@@ -67,7 +68,7 @@ namespace Net {
     //
     // Возвращает false при ошибке чтения.
     // -----------------------------------------------------------------------
-    bool ReadPropertyValue(
+    LibSunvoltum bool ReadPropertyValue(
         PacketReader& r,
         PropertyId&   outPropId,
         PropertyValue& outValue,

@@ -2,50 +2,45 @@
 #include "DataModel/InstanceClasses/ShapePart.h"
 #include "DataModel/InstanceClasses/Workspace.h"
 #include "DataModel/InstanceClasses/Lighting.h"
-#include "DataModel/InstanceClasses/Decal.h"
-#include "DataModel/InstanceClasses/TextureSurface.h"
-#include "DataModel/InstanceClasses/Model.h"
-#include "DataModel/InstanceClasses/Motor6D.h"
 #include "DataModel/InstanceClasses/Players.h"
 #include "DataModel/InstanceClasses/Player.h"
+#include "DataModel/InstanceClasses/Script.h"
+#include "DataModel/InstanceClasses/Motor6D.h"
+#include "DataModel/InstanceClasses/Humanoid.h"
 #include "Scripting/ServerSide/ServerScriptBridge.h"
 #include "Runtime/Runtime.h"
 #include "Network/NetworkManager.h"
 #include "Network/NetworkServer.h"
 #include "Network/SceneSerializer.h"
 #include "Network/ServerReplicator.h"
+#include "Network/NetworkSerializer.h"
+#include "DataModel/InstanceRegistry.h"
+#include "Types/CFrame.h"
+#include "Types/Vector3.h"
 #include <iostream>
-#include <cmath>
+#include <fstream>
+#include <sstream>
 #include <string>
+#include <vector>
 
 using namespace Sunvoltum;
 using namespace Sunvoltum::Classes;
 using namespace Sunvoltum::Scripting::Server;
 using namespace Sunvoltum::Net;
 
-// ---------------------------------------------------------------------------
-//  Вспомогательная функция создания ShapePart
-// ---------------------------------------------------------------------------
-static Instance& MakePart(InstanceParent& parent, const std::string& name,
-                           Shape shape, float r, float g, float b,
-                           float sx, float sy, float sz,
-                           float px, float py, float pz,
-                           bool anchored, bool canCollide,
-                           float transparency = 0.0f)
+static bool ReadFile(const std::string& path, std::string& out)
 {
-    auto& part = parent.AddInstance(name, ShapePart::ClassId);
-    part.SetProperty(ShapePart::Shape,        PropertyValue::Shape(shape));
-    part.SetProperty(ShapePart::Color,        PropertyValue::Color3({r, g, b}));
-    part.SetProperty(ShapePart::Transparency, PropertyValue::Float(transparency));
-    part.SetProperty(ShapePart::Reflectance,  PropertyValue::Float(0.0f));
-    part.SetProperty(ShapePart::Size,         PropertyValue::Vector3({sx, sy, sz}));
-    part.SetProperty(ShapePart::CFrame,       PropertyValue::CFrame(
-        Sunvoltum::CFrame::FromPosition(px, py, pz)));
-    part.SetProperty(ShapePart::Anchored,     PropertyValue::Bool(anchored));
-    part.SetProperty(ShapePart::CanCollide,   PropertyValue::Bool(canCollide));
-    part.SetProperty(ShapePart::PosVelocity,  PropertyValue::Vector3({0.0f, 0.0f, 0.0f}));
-    part.SetProperty(ShapePart::RotVelocity,  PropertyValue::Vector3({0.0f, 0.0f, 0.0f}));
-    return part;
+    std::ifstream f(path, std::ios::binary);
+    if (!f) return false;
+    std::ostringstream ss;
+    ss << f.rdbuf();
+    out = ss.str();
+    if (out.size() >= 3 &&
+        static_cast<unsigned char>(out[0]) == 0xEF &&
+        static_cast<unsigned char>(out[1]) == 0xBB &&
+        static_cast<unsigned char>(out[2]) == 0xBF)
+        out.erase(0, 3);
+    return true;
 }
 
 int main()
@@ -55,54 +50,99 @@ int main()
     Engine engine;
     engine.Init(EngineMode::Server);
 
-    // --- Сеть ---
     NetworkManager::Get().Init(EngineMode::Server);
 
     auto& dm = engine.DataModel;
 
-    auto& ws       = dm.AddInstance("Workspace", Workspace::ClassId);
+    auto& ws      = dm.AddInstance("Workspace", Workspace::ClassId);
     auto& lighting = dm.AddInstance("Lighting",  Lighting::ClassId);
     auto& players  = dm.AddInstance("Players",   Players::ClassId);
 
     ServerScriptBridge::Get().Init(&dm);
 
-    // --- SceneSerializer: колбэк завершения ---
-    // Вызывается когда клиент прислал SerializationComplete — сцена на клиенте готова.
-    SceneSerializer::Get().SetOnComplete([](NetworkId peerId)
-    {
-        std::cout << "[SunvoltumServer] Peer " << peerId
-                  << " fully loaded the scene\n";
+    lighting.SetProperty(Lighting::UseDefaultSky, PropertyValue::Bool(true));
 
-        // Помечаем пира готовым — теперь он будет получать live-репликацию.
+    ServerScriptBridge::Get().WatchWorkspace();
+
+    // -----------------------------------------------------------------------
+    //  Запуск скрипта сцены
+    // -----------------------------------------------------------------------
+    {
+        const std::string scriptPath = "Scripts/ServerScene.lua";
+        std::string source;
+        if (!ReadFile(scriptPath, source))
+        {
+            std::cerr << "[SunvoltumServer] ERROR: cannot open " << scriptPath << "\n";
+            return -1;
+        }
+
+        int scriptId = ServerScriptBridge::Get().LoadScriptFromSource(source);
+        ws.AddInstance("ServerScene", Script::ClassId, [scriptId](Instance& inst)
+        {
+            inst.SetProperty(Script::ScriptId, PropertyValue::Int(scriptId));
+            inst.SetProperty(Script::Disabled,  PropertyValue::Bool(false));
+        });
+
+        std::cout << "[SunvoltumServer] ServerScene.lua executed successfully.\n";
+    }
+
+    // -----------------------------------------------------------------------
+    //  C++ ссылки на объекты сцены
+    // -----------------------------------------------------------------------
+    Instance* charModel = ws.FindByName("Character1");
+    Instance* hrp       = charModel ? charModel->FindByName("HumanoidRootPart") : nullptr;
+    Instance* humanoid  = charModel ? charModel->FindByName("Humanoid")         : nullptr;
+
+    if (!hrp)
+        std::cerr << "[SunvoltumServer] WARNING: HumanoidRootPart not found.\n";
+    if (!humanoid)
+        std::cerr << "[SunvoltumServer] WARNING: Humanoid not found.\n";
+
+    std::vector<Instance*> ballInstances;
+    ballInstances.reserve(20);
+    for (int i = 1; i <= 20; ++i)
+    {
+        Instance* ball = ws.FindByName("Ball" + std::to_string(i));
+        if (ball)
+            ballInstances.push_back(ball);
+        else
+            std::cerr << "[SunvoltumServer] WARNING: Ball" << i << " not found.\n";
+    }
+
+    Instance* chairSeat  = ws.FindByName("ChairSeat");
+    Instance* propMotor  = ws.FindByName("PropMotor");
+
+    std::cout << "[SunvoltumServer] World ready: "
+              << ballInstances.size() << " balls, "
+              << (hrp      ? "HRP ok"      : "HRP missing")      << ", "
+              << (humanoid ? "Humanoid ok" : "Humanoid missing")  << ".\n";
+
+    // -----------------------------------------------------------------------
+    //  Сетевые колбэки
+    // -----------------------------------------------------------------------
+    SceneSerializer::Get().SetOnComplete([&](NetworkId peerId)
+    {
+        std::cout << "[SunvoltumServer] Peer " << peerId << " fully loaded the scene\n";
         ServerReplicator::Get().MarkPeerReady(peerId);
     });
 
-    // --- NetworkServer: колбэки и запуск ---
     NetworkServer::Get().SetOnPeerConnected([&](NetworkId id, const std::string& name)
     {
         std::cout << "[SunvoltumServer] Player connected: id=" << id
                   << " name=" << name << "\n";
 
-        // Создаём Player в Players
         auto& playerInst = players.AddInstance(name, Player::ClassId);
         playerInst.SetProperty(Player::Username,  PropertyValue::String(name));
         playerInst.SetProperty(Player::UserId,    PropertyValue::Int(static_cast<int32_t>(id)));
         playerInst.SetProperty(Player::NetworkId, PropertyValue::Int(static_cast<int32_t>(id)));
 
-        std::cout << "[SunvoltumServer] Created Player \"" << name
-                  << "\" (NetworkId=" << id << ") in Players\n";
-
-        // Запускаем сериализацию сцены для нового клиента.
-        // Player-объекты (ClassId=14) пропускаются — они создаются индивидуально.
         SceneSerializer::Get().StartForPeer(id, dm);
     });
 
     NetworkServer::Get().SetOnPeerDisconnected([&](NetworkId id)
     {
         std::cout << "[SunvoltumServer] Player disconnected: id=" << id << "\n";
-        // Убираем пира из репликации
         ServerReplicator::Get().MarkPeerGone(id);
-        // TODO: удалить Character и Player из DataModel
     });
 
     NetworkServer::Get().SetOnPacketReceived([&](NetworkId id, Net::PacketReader& r)
@@ -113,16 +153,12 @@ int main()
         case PT::ReadySerialization:
             SceneSerializer::Get().OnReadySerialization(id, r);
             break;
-
         case PT::AskInstance:
             SceneSerializer::Get().OnAskInstance(id, r);
             break;
-
         case PT::SerializationComplete:
             SceneSerializer::Get().OnSerializationComplete(id, r);
             break;
-
-        // TODO: обработка PropertyUpdate и других пакетов от клиента
         default:
             break;
         }
@@ -135,177 +171,351 @@ int main()
         return -1;
     }
 
-    ws.SetProperty(Workspace::Gravity,        PropertyValue::Number(196.2));
-    ws.SetProperty(Workspace::PhysicsEnabled, PropertyValue::Bool(true), true);
-
-    // -----------------------------------------------------------------------
-    //  Освещение
-    // -----------------------------------------------------------------------
-    lighting.SetProperty(Lighting::Brightness,         PropertyValue::Number(2.0));
-    lighting.SetProperty(Lighting::ClockTime,          PropertyValue::Number(14.0));
-    lighting.SetProperty(Lighting::GeographicLatitude, PropertyValue::Number(45.0));
-    lighting.SetProperty(Lighting::UseDefaultSky,      PropertyValue::Bool(true));
-
-    // -----------------------------------------------------------------------
-    //  Пол 95 x 1.5 x 95
-    // -----------------------------------------------------------------------
-    auto& floor = MakePart(ws, "Floor", Shape::Block,
-                            0.6f, 0.65f, 0.7f,
-                            95.0f, 1.5f, 95.0f,
-                            0.0f, 0.0f, 0.0f,
-                            true, true);
-    {
-        auto& g = floor.AddInstance("GrassSurface", TextureSurface::ClassId);
-        g.SetProperty(TextureSurface::Face,          PropertyValue::Int(0));
-        g.SetProperty(TextureSurface::Texture,       PropertyValue::String("PlatformContent/textures/grass/grass.dds"));
-        g.SetProperty(TextureSurface::StudsPerTileU, PropertyValue::Float(2.25f));
-        g.SetProperty(TextureSurface::StudsPerTileV, PropertyValue::Float(2.25f));
-    }
-
-    // -----------------------------------------------------------------------
-    //  Стены
-    // -----------------------------------------------------------------------
-    const float fH = 47.5f, wH = 12.0f, wT = 2.0f;
-    const float wY = 0.75f + wH * 0.5f;
-    MakePart(ws, "WallNorth", Shape::Block, 0.45f, 0.45f, 0.5f,  95.0f, wH, wT,          0.0f, wY,  fH + wT * 0.5f, true, true);
-    MakePart(ws, "WallSouth", Shape::Block, 0.45f, 0.45f, 0.5f,  95.0f, wH, wT,          0.0f, wY, -fH - wT * 0.5f, true, true);
-    MakePart(ws, "WallEast",  Shape::Block, 0.45f, 0.45f, 0.5f,  wT, wH, 95.0f + wT * 2.f,  fH + wT * 0.5f, wY, 0.0f, true, true);
-    MakePart(ws, "WallWest",  Shape::Block, 0.45f, 0.45f, 0.5f,  wT, wH, 95.0f + wT * 2.f, -fH - wT * 0.5f, wY, 0.0f, true, true);
-
-    // -----------------------------------------------------------------------
-    //  Персонаж (Character1) — создаётся сервером при старте.
-    //  При сетевом подключении игрока этот объект будет переиспользован
-    //  (или создан аналогично) и передан клиенту как его Character.
-    //
-    //  Конструкция R6:
-    //    HumanoidRootPart — единственная физическая часть (Anchored=false)
-    //    Все остальные части — Anchored=true, CanCollide=false,
-    //    позиционируются через Motor6D каждый физический тик.
-    // -----------------------------------------------------------------------
-    const float FLOOR_TOP = 0.75f;
-    const float HRP_H     = 4.0f;
-    const float HRP_CY    = FLOOR_TOP + HRP_H * 0.5f;  // 2.75
-
-    const float AX = 0.0f, AZ = 0.0f;
-
-    // Цвета частей тела
-    const float SK_R = 0.957f, SK_G = 0.800f, SK_B = 0.263f; // кожа
-    const float LG_R = 0.647f, LG_G = 0.737f, LG_B = 0.314f; // штаны
-    const float TR_R = 0.051f, TR_G = 0.412f, TR_B = 0.671f; // рубашка
-
-    auto& charModel = ws.AddInstance("Character1", Model::ClassId);
-
-    auto& hrp = MakePart(charModel, "HumanoidRootPart", Shape::Block,
-                          0.0f, 0.0f, 0.0f,
-                          2.0f, HRP_H, 1.0f,
-                          AX, HRP_CY, AZ,
-                          false, true, 1.0f);
-
-    auto& torso    = MakePart(charModel, "Torso",     Shape::Block, TR_R, TR_G, TR_B, 2.0f, 2.0f, 1.0f,  AX,        HRP_CY + 1.0f, AZ, true, false);
-    auto& leftLeg  = MakePart(charModel, "Left Leg",  Shape::Block, LG_R, LG_G, LG_B, 1.0f, 2.0f, 1.0f,  AX - 0.5f, HRP_CY - 1.0f, AZ, true, false);
-    auto& rightLeg = MakePart(charModel, "Right Leg", Shape::Block, LG_R, LG_G, LG_B, 1.0f, 2.0f, 1.0f,  AX + 0.5f, HRP_CY - 1.0f, AZ, true, false);
-    auto& leftArm  = MakePart(charModel, "Left Arm",  Shape::Block, SK_R, SK_G, SK_B, 1.0f, 2.0f, 1.0f,  AX - 1.5f, HRP_CY + 1.0f, AZ, true, false);
-    auto& rightArm = MakePart(charModel, "Right Arm", Shape::Block, SK_R, SK_G, SK_B, 1.0f, 2.0f, 1.0f,  AX + 1.5f, HRP_CY + 1.0f, AZ, true, false);
-
-    const float HEAD_CY = HRP_CY + 1.0f + 1.0f + 0.8f; // 5.55
-    auto& head = MakePart(charModel, "Head", Shape::Ball,
-                           SK_R, SK_G, SK_B,
-                           1.6f, 1.6f, 1.6f,
-                           AX, HEAD_CY, AZ,
-                           true, false);
-    {
-        auto& face = head.AddInstance("face", Decal::ClassId);
-        face.SetProperty(Decal::Face,         PropertyValue::Int(4));
-        face.SetProperty(Decal::Texture,      PropertyValue::String("PlatformContent/textures/EpicFace.dds"));
-        face.SetProperty(Decal::Transparency, PropertyValue::Float(0.0f));
-    }
-
-    charModel.SetProperty(Model::PrimaryPart, PropertyValue::Ref(&hrp));
-
-    // -----------------------------------------------------------------------
-    //  Motor6D — соединения конечностей
-    // -----------------------------------------------------------------------
-    auto MakeMotor = [&](const std::string& name,
-                         Instance& part1,
-                         float c0x, float c0y, float c0z,
-                         float c1x, float c1y, float c1z) -> Instance&
-    {
-        auto& motor = charModel.AddInstance(name, Motor6D::ClassId);
-        Motor6D::Init(motor);
-        motor.SetProperty(Motor6D::Part0, PropertyValue::Ref(&hrp));
-        motor.SetProperty(Motor6D::Part1, PropertyValue::Ref(&part1));
-        motor.SetProperty(Motor6D::C0,
-            PropertyValue::CFrame(Sunvoltum::CFrame::FromPosition(c0x, c0y, c0z)));
-        motor.SetProperty(Motor6D::C1,
-            PropertyValue::CFrame(Sunvoltum::CFrame::FromPosition(c1x, c1y, c1z)));
-        return motor;
-    };
-
-    MakeMotor("RootJoint",     torso,     0.0f,  0.0f, 0.0f,   0.0f, -1.0f, 0.0f);
-    MakeMotor("LeftHip",       leftLeg,  -0.5f,  0.0f, 0.0f,   0.0f, +1.0f, 0.0f);
-    MakeMotor("RightHip",      rightLeg, +0.5f,  0.0f, 0.0f,   0.0f, +1.0f, 0.0f);
-    MakeMotor("LeftShoulder",  leftArm,  -2.0f, +1.5f, 0.0f,  -0.5f, +0.5f, 0.0f);
-    MakeMotor("RightShoulder", rightArm, +2.0f, +1.5f, 0.0f,  +0.5f, +0.5f, 0.0f);
-    MakeMotor("Neck",          head,      0.0f, +2.0f, 0.0f,   0.0f, -0.8f, 0.0f);
-
-    // -----------------------------------------------------------------------
-    //  Тестовые кубики — падают с высоты, проверяют репликацию физики
-    // -----------------------------------------------------------------------
-    MakePart(ws, "FallingCube1", Shape::Block,
-             0.9f, 0.3f, 0.3f,          // красный
-             2.0f, 2.0f, 2.0f,
-             5.0f, 20.0f, 5.0f,
-             /*anchored=*/false, /*canCollide=*/true);
-
-    MakePart(ws, "FallingCube2", Shape::Ball,
-             0.3f, 0.6f, 0.9f,          // синий шар
-             2.0f, 2.0f, 2.0f,
-             -5.0f, 30.0f, -5.0f,
-             /*anchored=*/false, /*canCollide=*/true);
-
-    std::cout << "[SunvoltumServer] World built. Starting runtime...\n";
-
-    // --- ServerReplicator: инициализация после построения сцены ---
-    // Обходит всё дерево DataModel, присваивает InstanceNetId каждому объекту,
-    // навешивает подписки на ChildAdded/ChildRemoved/PropertyChanged.
-    // С этого момента любые изменения DataModel будут реплицироваться
-    // всем пирам у которых сериализация уже завершена.
     ServerReplicator::Get().Init(dm);
 
     // -----------------------------------------------------------------------
-    //  Runtime — без RenderBridge (сервер не рендерит)
+    //  Runtime
     // -----------------------------------------------------------------------
     Runtime runtime;
     runtime.SetEngine(&engine);
-    // SetRenderBridge намеренно не вызывается
 
-    bool hrpLocked = false;
-
-    // Плавное время суток — та же формула что в старом main.cpp:
-    // dt * 0.05 → ~3 минуты игрового времени в секунду реального
     double clockTime = 14.0;
 
-    runtime.PreSimulation = [&](float /*fixedDt*/)
+    // -------------------------------------------------------------------
+    //  AI-состояние персонажа: преследование случайного мяча + прыжок
+    // -------------------------------------------------------------------
+    int    aiTargetBallIdx = 0;           // индекс в ballInstances
+    double aiJumpTimer     = 0.0;         // накопленное время до следующего прыжка
+    constexpr double AI_JUMP_INTERVAL  = 6.0;   // прыжок каждые 6 секунд
+    constexpr double AI_RETARGET_DIST  = 3.0;   // переключить мяч если подошли ближе N стадов
+    // Инициализируем случайный мяч из ballInstances
+    if (!ballInstances.empty())
     {
-        if (!hrpLocked && engine.Physics.IsInitialized())
+        // простой детерминированный "случайный" старт — берём мяч #7
+        aiTargetBallIdx = static_cast<int>(ballInstances.size()) > 7 ? 7 : 0;
+    }
+
+    runtime.PreSimulation = [&](float fixedDt)
+    {
+        // -------------------------------------------------------------------
+        //  AI: персонаж бежит к случайному мячу + прыгает каждые 6 секунд
+        // -------------------------------------------------------------------
+        if (humanoid && hrp && !ballInstances.empty() && engine.Physics.IsInitialized())
         {
-            engine.Physics.LockUpright(hrp);
-            hrpLocked = true;
+            using H  = Classes::Humanoid;
+            using BP = Classes::BasePart;
+
+            // Позиция HRP
+            Sunvoltum::Vector3 hrpPos{};
+            {
+                auto* cfProp = hrp->GetProperty(BP::CFrame);
+                if (cfProp && cfProp->Type == PropertyType::CFrame)
+                    hrpPos = cfProp->Value.AsCFrame.Position;
+            }
+
+            // Позиция текущего целевого мяча
+            Instance* targetBall = ballInstances[aiTargetBallIdx];
+            Sunvoltum::Vector3 ballPos{};
+            {
+                auto* cfProp = targetBall->GetProperty(BP::CFrame);
+                if (cfProp && cfProp->Type == PropertyType::CFrame)
+                    ballPos = cfProp->Value.AsCFrame.Position;
+            }
+
+            // Горизонтальный вектор к мячу
+            float dx = ballPos.X - hrpPos.X;
+            float dz = ballPos.Z - hrpPos.Z;
+            float horizDist = std::sqrt(dx * dx + dz * dz);
+
+            // Если подошли близко — выбираем следующий мяч (по кругу)
+            if (horizDist < static_cast<float>(AI_RETARGET_DIST))
+            {
+                aiTargetBallIdx = (aiTargetBallIdx + 1) % static_cast<int>(ballInstances.size());
+                targetBall = ballInstances[aiTargetBallIdx];
+                // Пересчитываем позицию нового мяча
+                auto* cfProp = targetBall->GetProperty(BP::CFrame);
+                if (cfProp && cfProp->Type == PropertyType::CFrame)
+                    ballPos = cfProp->Value.AsCFrame.Position;
+                dx = ballPos.X - hrpPos.X;
+                dz = ballPos.Z - hrpPos.Z;
+                horizDist = std::sqrt(dx * dx + dz * dz);
+            }
+
+            // Нормализуем и записываем MoveDirection
+            if (horizDist > 1e-4f)
+            {
+                float inv = 1.0f / horizDist;
+                humanoid->SetProperty(H::MoveDirection,
+                    PropertyValue::Vector3(Sunvoltum::Vector3(dx * inv, 0.0f, dz * inv)));
+            }
+            else
+            {
+                humanoid->SetProperty(H::MoveDirection,
+                    PropertyValue::Vector3(Sunvoltum::Vector3(0.0f, 0.0f, 0.0f)));
+            }
+
+            // Прыжок каждые AI_JUMP_INTERVAL секунд
+            aiJumpTimer += static_cast<double>(fixedDt);
+            if (aiJumpTimer >= AI_JUMP_INTERVAL)
+            {
+                humanoid->SetProperty(H::Jump, PropertyValue::Bool(true));
+                aiJumpTimer -= AI_JUMP_INTERVAL;
+            }
+
+            // --- Лог позиции раз в секунду ---
+            static double s_logTimer = 0.0;
+            s_logTimer += static_cast<double>(fixedDt);
+            if (s_logTimer >= 1.0)
+            {
+                s_logTimer -= 1.0;
+                auto* stProp = humanoid->GetProperty(H::State);
+                int32_t st = (stProp && stProp->Type == PropertyType::Int)
+                             ? stProp->Value.AsInt : -1;
+                const char* stName[] = { "Idle", "Walking", "Jumping", "Falling", "Dead" };
+                std::cout << "[AI] HRP=(" << hrpPos.X << ", " << hrpPos.Y << ", " << hrpPos.Z
+                          << ")  target=Ball" << (aiTargetBallIdx + 1)
+                          << " at (" << ballPos.X << ", " << ballPos.Z << ")"
+                          << "  dist=" << horizDist
+                          << "  state=" << (st >= 0 && st <= 4 ? stName[st] : "?")
+                          << "\n";
+            }
+        }
+
+        // -------------------------------------------------------------------
+        //  Humanoid: движение, прыжок, обновление State
+        //
+        //  LockUpright вызывается автоматически PhysicsBridge при регистрации
+        //  HumanoidRootPart — вручную здесь больше не нужен.
+        // -------------------------------------------------------------------
+        if (humanoid && hrp && engine.Physics.IsInitialized())
+        {
+            using H = Classes::Humanoid;
+            using BP = Classes::BasePart;
+
+            // Читаем свойства Humanoid
+            auto* walkSpeedProp    = humanoid->GetProperty(H::WalkSpeed);
+            auto* jumpPowerProp    = humanoid->GetProperty(H::JumpPower);
+            auto* moveDirProp      = humanoid->GetProperty(H::MoveDirection);
+            auto* jumpProp         = humanoid->GetProperty(H::Jump);
+            auto* healthProp       = humanoid->GetProperty(H::Health);
+            auto* stateProp        = humanoid->GetProperty(H::State);
+
+            float walkSpeed = (walkSpeedProp && walkSpeedProp->Type == PropertyType::Float)
+                              ? walkSpeedProp->Value.AsFloat : 16.0f;
+            float jumpPower = (jumpPowerProp && jumpPowerProp->Type == PropertyType::Float)
+                              ? jumpPowerProp->Value.AsFloat : 50.0f;
+            float health    = (healthProp && healthProp->Type == PropertyType::Float)
+                              ? healthProp->Value.AsFloat : 100.0f;
+            int32_t state   = (stateProp && stateProp->Type == PropertyType::Int)
+                              ? stateProp->Value.AsInt : H::STATE_IDLE;
+
+            Sunvoltum::Vector3 moveDir{};
+            if (moveDirProp && moveDirProp->Type == PropertyType::Vector3)
+                moveDir = moveDirProp->Value.AsVector3;
+
+            bool wantsJump = (jumpProp && jumpProp->Type == PropertyType::Bool)
+                             && jumpProp->Value.AsBool;
+
+            // Текущая скорость HRP
+            auto* posVelProp = hrp->GetProperty(BP::PosVelocity);
+            Sunvoltum::Vector3 vel{};
+            if (posVelProp && posVelProp->Type == PropertyType::Vector3)
+                vel = posVelProp->Value.AsVector3;
+
+            // ------------------------------------------------------------------
+            //  Grounded-проверка: raycast вниз от нижней грани HRP
+            //  HRP Size.Y = 4 → нижняя грань = pos.Y - 2.0
+            // ------------------------------------------------------------------
+            bool grounded = false;
+            {
+                auto* cfProp = hrp->GetProperty(BP::CFrame);
+                if (cfProp && cfProp->Type == PropertyType::CFrame)
+                {
+                    const auto& pos = cfProp->Value.AsCFrame.Position;
+                    constexpr float HRP_HALF_H   = 2.0f;
+                    constexpr float RAY_OFFSET    = 0.05f;
+                    constexpr float RAY_MAX_DIST  = 0.20f;
+                    Sunvoltum::Vector3 rayOrigin(
+                        pos.X,
+                        pos.Y - HRP_HALF_H + RAY_OFFSET,
+                        pos.Z);
+                    auto hit = engine.Physics.Raycast(
+                        rayOrigin,
+                        Sunvoltum::Vector3(0.0f, -1.0f, 0.0f),
+                        RAY_MAX_DIST,
+                        hrp);
+                    grounded = hit.Hit;
+                }
+            }
+
+            // ------------------------------------------------------------------
+            //  Смерть — не применяем движение
+            // ------------------------------------------------------------------
+            if (health <= 0.0f)
+            {
+                if (state != H::STATE_DEAD)
+                    humanoid->SetProperty(H::State, PropertyValue::Int(H::STATE_DEAD));
+            }
+            else
+            {
+                // ------------------------------------------------------------------
+                //  Прыжок
+                // ------------------------------------------------------------------
+                if (wantsJump && grounded)
+                {
+                    vel.Y = jumpPower;
+                    hrp->SetProperty(BP::PosVelocity, PropertyValue::Vector3(vel));
+                    humanoid->SetProperty(H::Jump, PropertyValue::Bool(false));
+                    humanoid->SetProperty(H::State, PropertyValue::Int(H::STATE_JUMPING));
+                }
+                else
+                {
+                    // Сбрасываем Jump-триггер даже если не на земле
+                    if (wantsJump)
+                        humanoid->SetProperty(H::Jump, PropertyValue::Bool(false));
+
+                    // ------------------------------------------------------------------
+                    //  Горизонтальное движение: применяем WalkSpeed по X/Z
+                    //  Y-скорость оставляем физике (гравитация/прыжок)
+                    // ------------------------------------------------------------------
+                    float moveLen = std::sqrt(moveDir.X * moveDir.X + moveDir.Z * moveDir.Z);
+                    if (moveLen > 1e-4f)
+                    {
+                        float inv = 1.0f / moveLen;
+                        vel.X = moveDir.X * inv * walkSpeed;
+                        vel.Z = moveDir.Z * inv * walkSpeed;
+                    }
+                    else
+                    {
+                        vel.X = 0.0f;
+                        vel.Z = 0.0f;
+                    }
+                    hrp->SetProperty(BP::PosVelocity, PropertyValue::Vector3(vel));
+
+                    // ------------------------------------------------------------------
+                    //  State: Idle / Walking / Jumping / Falling
+                    // ------------------------------------------------------------------
+                    int32_t newState;
+                    if (!grounded && vel.Y > 0.1f)
+                        newState = H::STATE_JUMPING;
+                    else if (!grounded && vel.Y < -0.1f)
+                        newState = H::STATE_FALLING;
+                    else if (moveLen > 1e-4f)
+                        newState = H::STATE_WALKING;
+                    else
+                        newState = H::STATE_IDLE;
+
+                    if (newState != state)
+                        humanoid->SetProperty(H::State, PropertyValue::Int(newState));
+                }
+            }
+        }
+
+        // Bounce-логика для мячей
+        if (engine.Physics.IsInitialized())
+        {
+            constexpr float BALL_RADIUS  = 1.5f;
+            constexpr float BOUNCE_VEL   = 55.0f;
+            constexpr float RAY_OFFSET   = 0.05f;
+            constexpr float RAY_MAX_DIST = 0.25f;
+
+            for (Instance* ball : ballInstances)
+            {
+                const PropertyValue* vp = ball->GetProperty(ShapePart::PosVelocity);
+                if (!vp || vp->Type != PropertyType::Vector3) continue;
+                Sunvoltum::Vector3 vel = vp->Value.AsVector3;
+                if (vel.Y > 0.0f) continue;
+
+                const PropertyValue* cp = ball->GetProperty(ShapePart::CFrame);
+                if (!cp || cp->Type != PropertyType::CFrame) continue;
+                const Sunvoltum::Vector3& pos = cp->Value.AsCFrame.Position;
+
+                Sunvoltum::Vector3 rayOrigin(pos.X, pos.Y - BALL_RADIUS + RAY_OFFSET, pos.Z);
+                auto hit = engine.Physics.Raycast(
+                    rayOrigin, Sunvoltum::Vector3(0.0f, -1.0f, 0.0f), RAY_MAX_DIST, ball);
+
+                if (hit.Hit)
+                {
+                    vel.Y = BOUNCE_VEL;
+                    ball->SetProperty(ShapePart::PosVelocity, PropertyValue::Vector3(vel));
+                }
+            }
+        }
+
+        // Bounce-логика для стула (ChairSeat — главная динамическая часть)
+        if (engine.Physics.IsInitialized() && chairSeat)
+        {
+            // Расстояние от центра сидения до дна ножек:
+            //   legDY = -0.9 (центр ножки), halfLegH = 0.75 → нижняя грань = -1.65
+            constexpr float CHAIR_BOTTOM  = 1.65f;
+            constexpr float BOUNCE_VEL    = 55.0f;
+            constexpr float RAY_OFFSET    = 0.05f;
+            constexpr float RAY_MAX_DIST  = 0.25f;
+
+            const PropertyValue* vp = chairSeat->GetProperty(ShapePart::PosVelocity);
+            if (vp && vp->Type == PropertyType::Vector3)
+            {
+                Sunvoltum::Vector3 vel = vp->Value.AsVector3;
+                if (vel.Y <= 0.0f)
+                {
+                    const PropertyValue* cp = chairSeat->GetProperty(ShapePart::CFrame);
+                    if (cp && cp->Type == PropertyType::CFrame)
+                    {
+                        const Sunvoltum::Vector3& pos = cp->Value.AsCFrame.Position;
+                        // Raycast от нижней грани ножек вниз
+                        Sunvoltum::Vector3 rayOrigin(
+                            pos.X,
+                            pos.Y - CHAIR_BOTTOM + RAY_OFFSET,
+                            pos.Z);
+                        auto hit = engine.Physics.Raycast(
+                            rayOrigin,
+                            Sunvoltum::Vector3(0.0f, -1.0f, 0.0f),
+                            RAY_MAX_DIST,
+                            chairSeat);
+                        if (hit.Hit)
+                        {
+                            vel.Y = BOUNCE_VEL;
+                            chairSeat->SetProperty(ShapePart::PosVelocity,
+                                PropertyValue::Vector3(vel));
+                        }
+                    }
+                }
+            }
+        }
+
+        // Пропеллер: каждый тик прибавляем к DesiredAngle шаг MaxVelocity * dt.
+        // PhysicsBridge::SyncJointsDrive видит (DesiredAngle - CurrentAngle) > 0
+        // и выставляет DriveVelocity = +MaxVelocity → вал крутится непрерывно.
+        if (propMotor && engine.Physics.IsInitialized())
+        {
+            using M6D = Classes::Motor6D;
+
+            auto* maxVelProp     = propMotor->GetProperty(M6D::MaxVelocity);
+            auto* currentAngProp = propMotor->GetProperty(M6D::CurrentAngle);
+            auto* desiredAngProp = propMotor->GetProperty(M6D::DesiredAngle);
+
+            if (maxVelProp     && maxVelProp->Type     == PropertyType::Float &&
+                currentAngProp && currentAngProp->Type == PropertyType::Float &&
+                desiredAngProp && desiredAngProp->Type == PropertyType::Float)
+            {
+                float maxVel      = maxVelProp->Value.AsFloat;
+                float currentAngle = currentAngProp->Value.AsFloat;
+                // Держим DesiredAngle на два шага впереди CurrentAngle —
+                // мотор никогда не "догоняет" цель и не останавливается.
+                float newDesired  = currentAngle + maxVel * fixedDt * 2.0f;
+                propMotor->SetProperty(M6D::DesiredAngle,
+                    PropertyValue::Float(newDesired));
+            }
         }
     };
 
     runtime.Heartbeat = [&](float dt)
     {
-        // Тик сети — обрабатываем входящие UDP-датаграммы
         NetworkManager::Get().Poll();
         NetworkServer::Get().ResendPending();
-
-        // Rate-limited PropertyUpdate — отправляем накопленные грязные значения
         ServerReplicator::Get().Tick();
-
         engine.Tick(dt);
 
-        // Время суток: каждый кадр как в старом main.cpp
         clockTime += static_cast<double>(dt) * 0.5;
         if (clockTime >= 24.0) clockTime -= 24.0;
         lighting.SetProperty(Lighting::ClockTime, PropertyValue::Number(clockTime));
@@ -314,10 +524,6 @@ int main()
         s_time += static_cast<double>(dt);
         ServerScriptBridge::Get().StepScheduler(s_time);
     };
-
-    // TODO: сюда подключить NetworkServer после выбора транспорта.
-    // runtime.RenderStepped — оставляем пустым на сервере,
-    // входящий сетевой трафик (позиции игроков) будет обрабатываться здесь.
 
     runtime.Start();
 

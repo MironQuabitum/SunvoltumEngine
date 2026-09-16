@@ -14,8 +14,6 @@ namespace Classes {
     //   Username   (String) — отображаемое имя игрока
     //   UserId     (Int)    — уникальный числовой идентификатор аккаунта
     //   NetworkId  (Int)    — идентификатор сетевого соединения (peer id).
-    //                         Используется в SetNetworkOwner(player) чтобы
-    //                         связать Instance с конкретным подключённым клиентом.
     //                         Сервер назначает его при установке соединения.
     //
     // Пример использования (C++):
@@ -39,6 +37,11 @@ namespace Classes {
         // Через этот Id сервер знает кому принадлежит Instance
         // с установленным NetworkOwner.
         static constexpr PropertyId NetworkId = 2;
+
+        // Ссылка на модель персонажа (InstanceRef → Model).
+        // Сервер устанавливает при спавне, клиент читает для управления камерой.
+        // nil пока персонаж не заспавнен или после смерти.
+        static constexpr PropertyId Character = 3;
     };
 
 } // namespace Classes

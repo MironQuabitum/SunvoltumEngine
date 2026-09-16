@@ -9,6 +9,7 @@
 #include "../../LibSunvoltum.h"
 #include "../../DataModel/DataModel.h"
 #include "../../DataModel/Instance.h"
+#include "../../DataModel/InstanceParent.h"
 
 // Forward-declare lua_State чтобы не тащить Luau в публичный заголовок
 struct lua_State;
@@ -112,6 +113,10 @@ namespace Server {
         // Вызывается из C-функции wait() непосредственно перед lua_yield.
         void ScheduleWake(lua_State* thread, int threadRef, double duration);
 
+        // Подписаться на ChildAdded у Workspace — запускать Script автоматически
+        // когда инстанс с ненулевым ScriptId добавляется в иерархию Workspace.
+        void WatchWorkspace();
+
     private:
         ServerScriptBridge()  = default;
         ~ServerScriptBridge() = default;
@@ -139,12 +144,10 @@ namespace Server {
         int                                   m_nextId = 1;
         std::unordered_map<int, std::string>  m_scripts;
 
-        // Очередь спящих корутин (wait / task.wait)
         std::vector<SleepEntry>               m_sleeping;
-
-        // Корутины, прерванные из-за исчерпания instruction budget.
-        // Возобновляются в начале следующего кадра.
         std::vector<BudgetEntry>              m_interrupted;
+
+        ChildAddedToken                       m_watchToken;
 
         static const std::string              s_empty;
     };

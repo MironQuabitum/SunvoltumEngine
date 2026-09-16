@@ -44,6 +44,9 @@ namespace Sunvoltum {
         // shape      — тип примитива
         // anchored   — статик или динамик
         // canCollide — если false, shape не участвует в коллизиях (но гравитация работает)
+        // kinematic  — если true и anchored=false: PxRigidDynamic с eKINEMATIC.
+        //              PhysX не симулирует тело (нет гравитации), но оно участвует
+        //              в коллизиях.
         bool Init(
             px::PxPhysics* physics,
             px::PxScene*   scene,
@@ -51,7 +54,8 @@ namespace Sunvoltum {
             const Vector3& size,
             Shape          shape,
             bool           anchored,
-            bool           canCollide = true
+            bool           canCollide = true,
+            bool           kinematic  = false
         );
 
         // Удалить актор из сцены и освободить ресурсы.
@@ -92,13 +96,38 @@ namespace Sunvoltum {
         // --- Запись состояния DataModel → PhysX ---
 
         // Телепортировать актор (установить позицию напрямую, без физики).
+        // Для кинематических тел используйте SetKinematicTarget.
         void SetCFrame(const CFrame& cf);
 
-        // Установить линейную скорость (только dynamic).
+        // Установить линейную скорость (только dynamic, не кинематический).
         void SetLinearVelocity(const Vector3& v);
 
-        // Установить угловую скорость (только dynamic).
+        // Установить угловую скорость (только dynamic, не кинематический).
         void SetAngularVelocity(const Vector3& v);
+
+        // Кинематический режим (joints).
+        //
+        // Кинематическое тело — это PxRigidDynamic с флагом eKINEMATIC:
+        //   • PhysX НЕ применяет гравитацию и силы.
+        //   • Тело двигается только через SetKinematicTarget.
+        //   • Участвует в коллизиях: другие динамические тела отскакивают от него.
+        // -----------------------------------------------------------------------
+        bool IsKinematic() const { return m_kinematic; }
+
+        // Переключить кинематический режим на лету (только для dynamic-актора).
+        // Не пересоздаёт актор — просто меняет флаг eKINEMATIC.
+        void SetKinematic(bool kinematic);
+
+        // Установить целевую позицию для кинематического тела.
+        // PhysX переместит тело к этой позиции на следующем шаге симуляции,
+        // правильно обновив broad-phase и контакты.
+        // Вызывать каждый тик когда нужно переместить кинематическое тело.
+        void SetKinematicTarget(const CFrame& cf);
+
+        // Разбудить тело если оно в sleep-режиме (только dynamic non-kinematic).
+        // PhysX засыпает тела когда скорость близка к нулю — нужно явно разбудить
+        // ChairSeat после регистрации Weld чтобы гравитация заработала.
+        void WakeUp();
 
     private:
         // Построить PxTransform из Sunvoltum::CFrame
@@ -110,6 +139,7 @@ namespace Sunvoltum {
         px::PxRigidActor* m_actor       = nullptr;
         px::PxMaterial*   m_material    = nullptr;
         bool              m_anchored    = false;
+        bool              m_kinematic   = false;   // eKINEMATIC flag на PxRigidDynamic
         bool              m_canCollide  = true;
         bool              m_initialized = false;
 

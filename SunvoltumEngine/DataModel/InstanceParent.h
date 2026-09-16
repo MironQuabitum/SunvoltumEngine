@@ -107,6 +107,11 @@ namespace Sunvoltum {
         virtual ~InstanceParent() = default;
 
         virtual Instance& AddInstance(const std::string& name, int8_t classId) = 0;
+
+        // Перегрузка с функцией инициализации — вызывается ДО FireChildAdded.
+        // Позволяет установить свойства до того как подписчики увидят инстанс.
+        virtual Instance& AddInstance(const std::string& name, int8_t classId,
+                                      std::function<void(Instance&)> initFn) = 0;
         virtual Instance* FindByName(const std::string& name) = 0;
         virtual const std::vector<std::unique_ptr<Instance>>& GetChildren() const = 0;
 

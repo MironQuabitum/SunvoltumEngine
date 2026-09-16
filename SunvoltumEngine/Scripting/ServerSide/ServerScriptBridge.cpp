@@ -1,5 +1,6 @@
 #include "ServerScriptBridge.h"
 #include "LuauBindings.h"
+#include "../../DataModel/InstanceClasses/Script.h"
 
 #include <lua.h>
 #include <lualib.h>
@@ -457,3 +458,53 @@ ScriptRunResult ServerScriptBridge::RunScript(int scriptId,
 } // namespace Server
 } // namespace Scripting
 } // namespace Sunvoltum
+
+// ===========================================================================
+//  WatchWorkspace — автозапуск Script при добавлении в Workspace
+// ===========================================================================
+
+namespace Sunvoltum { namespace Scripting { namespace Server {
+
+void ServerScriptBridge::WatchWorkspace()
+{
+    if (!m_dataModel) return;
+
+    Instance* ws = m_dataModel->FindByName("Workspace");
+    if (!ws)
+    {
+        std::cerr << "[ServerScriptBridge] WatchWorkspace: Workspace not found\n";
+        return;
+    }
+
+    m_watchToken = ws->SubscribeChildAdded([this](Instance& child)
+    {
+        if (child.GetClassId() != Classes::CLASS_SCRIPT)
+            return;
+
+        if (Classes::Script::IsDisabled(child))
+            return;
+
+        int scriptId = Classes::Script::GetScriptId(child);
+        if (scriptId <= 0)
+        {
+            std::cerr << "[ServerScriptBridge] Script \""
+                      << child.GetName() << "\" has no ScriptId, skipping\n";
+            return;
+        }
+
+        std::cout << "[ServerScriptBridge] Auto-running Script \""
+                  << child.GetName() << "\" (ScriptId=" << scriptId << ")\n";
+
+        std::string err;
+        auto result = RunScript(scriptId, &child, &err);
+        if (result != ScriptRunResult::Ok)
+        {
+            std::cerr << "[ServerScriptBridge] Error in Script \""
+                      << child.GetName() << "\": " << err << "\n";
+        }
+    });
+
+    std::cout << "[ServerScriptBridge] Watching Workspace for Script\n";
+}
+
+} } } // namespace Sunvoltum::Scripting::Server

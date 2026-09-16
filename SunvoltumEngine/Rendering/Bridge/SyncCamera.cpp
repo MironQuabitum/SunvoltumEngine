@@ -1,11 +1,11 @@
-﻿#include "BridgeCommon.h"
+#include "BridgeCommon.h"
 
 namespace Sunvoltum {
 
     // -------------------------------------------------------------------------
     // SubscribeCamera — вызывается один раз из Init.
     // Кэшируем указатель на CurrentCamera Instance и подписываемся на
-    // CFrame и FieldOfView. Коллбэки применяют изменение к MeturmRender::Camera
+    // CFrame и FieldOfView. Коллбэки применяют изменение к SunvoltumRender::Objects::Camera
     // немедленно и выставляют m_needCameraSync=true для синхронизации.
     // -------------------------------------------------------------------------
     void RenderBridge::SubscribeCamera()
@@ -25,7 +25,9 @@ namespace Sunvoltum {
             [this](const PropertyValue& val)
             {
                 if (val.Type != PropertyType::CFrame) return;
-                m_camera->SetCFrame(ToCFrame(val.Value.AsCFrame));
+                const auto& cf = val.Value.AsCFrame;
+                m_camera->SetPosition(ToRender3(cf.Position));
+                m_camera->SetRotation(ToMatrix(cf.Rotation));
             });
 
         // FOV меняется редко — коллбэк обновляет матрицу проекции немедленно
@@ -37,14 +39,17 @@ namespace Sunvoltum {
                                static_cast<float>(m_window->GetHeight());
                 m_camera->SetPerspective(static_cast<float>(val.Value.AsNumber),
                                          aspect,
-                                         m_camera->GetNearZ(),
-                                         m_camera->GetFarZ());
+                                         m_camera->GetNearPlane(),
+                                         m_camera->GetFarPlane());
             });
 
         // Применяем начальные значения
         auto* cf = m_cameraInst->GetProperty(Classes::CurrentCamera::CFrame);
         if (cf && cf->Type == PropertyType::CFrame)
-            m_camera->SetCFrame(ToCFrame(cf->Value.AsCFrame));
+        {
+            m_camera->SetPosition(ToRender3(cf->Value.AsCFrame.Position));
+            m_camera->SetRotation(ToMatrix(cf->Value.AsCFrame.Rotation));
+        }
 
         auto* fov = m_cameraInst->GetProperty(Classes::CurrentCamera::FieldOfView);
         if (fov && fov->Type == PropertyType::Number)
@@ -53,8 +58,8 @@ namespace Sunvoltum {
                            static_cast<float>(m_window->GetHeight());
             m_camera->SetPerspective(static_cast<float>(fov->Value.AsNumber),
                                      aspect,
-                                     m_camera->GetNearZ(),
-                                     m_camera->GetFarZ());
+                                     m_camera->GetNearPlane(),
+                                     m_camera->GetFarPlane());
         }
 
         m_needCameraSync = false;

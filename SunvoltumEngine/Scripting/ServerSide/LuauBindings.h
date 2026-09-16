@@ -4,8 +4,7 @@
 //
 // Весь общий код (Instance/DataModel/CFrame биндинги) живёт в Shared/.
 // Этот заголовок нужен для обратной совместимости: ServerScriptBridge
-// и другой серверный код включают его и получают все Shared-символы
-// плюс серверные расширения (когда они появятся).
+// и другой серверный код включают его и получают все Shared-символы.
 
 #include "../Shared/LuauHelpers.h"
 #include "../Shared/SharedBindings.h"
@@ -34,8 +33,8 @@ namespace Server {
     using Shared::CFrameUD;
 
     // RegisterSharedBindings — регистрирует все общие метатаблицы и CFrame-глобал.
-    // Серверный код вызывает именно эту функцию при Init VM.
     using Shared::RegisterSharedBindings;
+    using Shared::RegisterSharedBindingsWithDM;
 
 } // namespace Server
 } // namespace Scripting

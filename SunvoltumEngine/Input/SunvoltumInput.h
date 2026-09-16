@@ -1,4 +1,4 @@
-﻿#pragma once
+#pragma once
 
 #include "../LibSunvoltum.h"
 #include "LibSunvoltumRender.h"
@@ -6,8 +6,8 @@
 #include "MouseButton.h"
 #include "../Runtime/IInputSource.h"
 
-// MeturmFrame::Input скрыт — клиент не тянет MeturmFrame заголовки
-namespace MeturmFrame { class Input; }
+// SunvoltumManager::Input скрыт — клиент не тянет SunvoltumManager заголовки
+namespace SunvoltumManager { class Input; }
 
 namespace Sunvoltum {
 
@@ -17,7 +17,7 @@ namespace Sunvoltum {
         SunvoltumInput() = default;
 
         // Вызывается из RenderBridge — устанавливает источник ввода
-        void SetSource(MeturmFrame::Input* input);
+        void SetSource(SunvoltumManager::Input* input);
 
         bool IsValid() const;
 
@@ -36,15 +36,21 @@ namespace Sunvoltum {
         int  GetMouseDeltaY() const override;
         int  GetMouseWheel()  const override;
 
-        void SetCursorVisible(bool visible)  override;
-        bool IsCursorVisible()         const override;
+        void SetSystemCursorVisible(bool visible)  override;
+        bool IsSystemCursorVisible()         const override;
+        void SetEngineCursorVisible(bool visible)  override;
+        bool IsEngineCursorVisible()         const override;
+
+        int  GetRawMouseDeltaX()             const override;
+        int  GetRawMouseDeltaY()             const override;
+
         void SetMouseLocked(bool locked)     override;
         bool IsMouseLocked()           const override;
         void ResetMouseDelta()               override;
         void SetMousePosition(int x, int y)  override;
 
     private:
-        MeturmFrame::Input* m_source = nullptr;
+        SunvoltumManager::Input* m_source = nullptr;
     };
 
 } // namespace Sunvoltum

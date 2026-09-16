@@ -26,6 +26,8 @@ namespace Sunvoltum {
         DataModel& operator=(DataModel&&) = default;
 
         Instance& AddInstance(const std::string& name, ClassId classId) override;
+        Instance& AddInstance(const std::string& name, ClassId classId,
+                              std::function<void(Instance&)> initFn) override;
         Instance& AddInstance(const std::string& name, ClassId classId, InstanceParent& parent);
 
         Instance* FindByName(const std::string& name) override;

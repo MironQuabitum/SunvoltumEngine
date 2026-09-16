@@ -5,6 +5,7 @@
 #include <vector>
 #include <memory>
 #include <unordered_map>
+#include <functional>
 
 #include "../LibSunvoltum.h"
 #include "InstanceParent.h"
@@ -41,6 +42,7 @@ namespace Sunvoltum {
         Instance& operator=(Instance&&) = default;
 
         const std::string& GetName()    const;
+        void               SetName(const std::string& name);
         ClassId            GetClassId() const;
 
         InstanceParent* GetParent() const;
@@ -54,6 +56,12 @@ namespace Sunvoltum {
         void          SetNetId(InstanceNetId id);
 
         Instance& AddInstance(const std::string& name, ClassId classId) override;
+
+        // Перегрузка с функцией инициализации — вызывается ДО FireChildAdded.
+        // Используется чтобы установить свойства (ScriptId и т.д.) до того как
+        // подписчики ChildAdded увидят инстанс.
+        Instance& AddInstance(const std::string& name, ClassId classId,
+                               std::function<void(Instance&)> initFn) override;
         Instance* FindByName(const std::string& name) override;
         const std::vector<std::unique_ptr<Instance>>& GetChildren() const override;
 
@@ -79,9 +87,9 @@ namespace Sunvoltum {
 
     private:
         std::string                                   m_name;
-        ClassId                                       m_classId = 0;
-        InstanceNetId                                 m_netId   = INVALID_INSTANCE_NET_ID;
-        InstanceParent*                               m_parent  = nullptr;
+        ClassId                                       m_classId         = 0;
+        InstanceNetId                                 m_netId           = INVALID_INSTANCE_NET_ID;
+        InstanceParent*                               m_parent          = nullptr;
         std::vector<std::unique_ptr<Instance>>        m_children;
         std::unordered_map<PropertyId, PropertyEntry> m_properties;
     };
