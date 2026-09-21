@@ -1,4 +1,4 @@
-﻿# CMakeList.txt: файл проекта CMake верхнего уровня; проведите глобальную конфигурацию
+# CMakeList.txt: файл проекта CMake верхнего уровня; проведите глобальную конфигурацию
 # и включите сюда подпроекты.
 #
 cmake_minimum_required (VERSION 3.8)
@@ -19,3 +19,6 @@ add_subdirectory ("SunvoltumEngine")
 add_subdirectory ("SunvoltumRender")
 add_subdirectory ("SunvoltumClient")
 add_subdirectory ("SunvoltumServer")
+add_subdirectory ("SunvoltumPhysics")
+add_subdirectory ("SunvoltumPDemo")
+
