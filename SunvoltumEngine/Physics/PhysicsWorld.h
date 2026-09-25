@@ -1,43 +1,39 @@
-﻿#pragma once
+#pragma once
 
 #include "PhysicsCommon.h"
+#include <memory>
 
 namespace Sunvoltum {
 
     class PhysicsManager;
 
-    // PhysicsWorld — обёртка над PxScene.
-    // Использует PGS (Projected Gauss-Seidel) solver — дефолтный и
-    // наименее ресурсоёмкий решатель в PhysX 5.
-    // Один экземпляр на движок; создаётся PhysicsBridge после Init менеджера.
+    // PhysicsWorld — обёртка над SunvoltumPhysics::World.
     class PhysicsWorld
     {
     public:
-        PhysicsWorld()  = default;
-        ~PhysicsWorld() = default;
+        PhysicsWorld();
+        ~PhysicsWorld();
 
         PhysicsWorld(const PhysicsWorld&)            = delete;
         PhysicsWorld& operator=(const PhysicsWorld&) = delete;
 
-        // Создать PxScene с заданной гравитацией.
-        bool Init(PhysicsManager& manager, float gravityY = -9.8f);
-
-        // Освободить PxScene.
+        bool Init(PhysicsManager& manager, float gravityY = -196.2f);
         void Shutdown();
 
-        // Продвинуть симуляцию на dt секунд (вызывать с фиксированным шагом).
+        // Шаг симуляции с фиксированным шагом dt
         void Step(float dt);
 
-        // Изменить гравитацию на лету (например, при смене Workspace.Gravity).
+        // Изменить гравитацию на лету
         void SetGravity(float gravityY);
 
         bool IsInitialized() const { return m_initialized; }
 
-        px::PxScene* GetScene() const { return m_scene; }
+        SunvoltumPhysics::World& GetWorld() { return *m_world; }
+        const SunvoltumPhysics::World& GetWorld() const { return *m_world; }
 
     private:
-        px::PxScene* m_scene       = nullptr;
-        bool         m_initialized = false;
+        std::unique_ptr<SunvoltumPhysics::World> m_world;
+        bool m_initialized = false;
     };
 
 } // namespace Sunvoltum

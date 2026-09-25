@@ -360,10 +360,16 @@ int main()
             {
                 // ------------------------------------------------------------------
                 //  Прыжок
+                //  JUMP_POWER_SCALE: коэффициент совместимости SunvoltumPhysics ↔ PhysX 5.0.
+                //  В PhysX JumpPower=50 давало определённую высоту прыжка.
+                //  SunvoltumPhysics интегрирует скорость иначе (нет внутреннего масштаба),
+                //  поэтому для того же визуального результата нужно умножить на 3.0.
+                //  Итог: в скриптах/параметрах JumpPower=50 → применяется как 150 studs/s.
                 // ------------------------------------------------------------------
+                static constexpr float JUMP_POWER_SCALE = 3.0f;
                 if (wantsJump && grounded)
                 {
-                    vel.Y = jumpPower;
+                    vel.Y = jumpPower * JUMP_POWER_SCALE;
                     hrp->SetProperty(BP::PosVelocity, PropertyValue::Vector3(vel));
                     humanoid->SetProperty(H::Jump, PropertyValue::Bool(false));
                     humanoid->SetProperty(H::State, PropertyValue::Int(H::STATE_JUMPING));

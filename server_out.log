@@ -1,0 +1,4 @@
+[SunvoltumServer] Starting in Server mode...
+[SunvoltumEngine] Init | mode: Server
+[ServerScriptBridge] Luau VM initialized
+[ServerScriptBridge] Watching Workspace for Script

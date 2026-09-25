@@ -1,49 +1,26 @@
-﻿#include "PhysicsWorld.h"
+#include "PhysicsWorld.h"
 #include "PhysicsManager.h"
 #include <iostream>
 
 namespace Sunvoltum {
 
+    PhysicsWorld::PhysicsWorld() = default;
+    PhysicsWorld::~PhysicsWorld()
+    {
+        Shutdown();
+    }
+
     bool PhysicsWorld::Init(PhysicsManager& manager, float gravityY)
     {
+        (void)manager;
         if (m_initialized) return true;
 
-        px::PxPhysics*              physics    = manager.GetPhysics();
-        px::PxDefaultCpuDispatcher* dispatcher = manager.GetDispatcher();
-
-        if (!physics || !dispatcher)
-        {
-            std::cerr << "[PhysicsWorld] PhysicsManager not initialized\n";
-            return false;
-        }
-
-        px::PxSceneDesc sceneDesc(physics->getTolerancesScale());
-
-        // Гравитация: только Y-вниз, X/Z = 0
-        sceneDesc.gravity       = px::PxVec3(0.0f, gravityY, 0.0f);
-        sceneDesc.cpuDispatcher = dispatcher;
-
-        // PGS solver — выбираем явно, хотя это и дефолт PhysX 5
-        sceneDesc.solverType    = px::PxSolverType::ePGS;
-
-        // Флаги: отключаем то, что нам не нужно
-        // eENABLE_CCD — continuous collision detection (дорого, не нужно пока)
-        // eENABLE_GPU_DYNAMICS — GPU-симуляция (не используем)
-        // Оставляем только базовую твёрдотельную симуляцию
-        sceneDesc.flags =
-            px::PxSceneFlag::eENABLE_ACTIVE_ACTORS;  // быстрый доступ к двигавшимся акторам
-
-        sceneDesc.filterShader  = px::PxDefaultSimulationFilterShader;
-
-        m_scene = physics->createScene(sceneDesc);
-        if (!m_scene)
-        {
-            std::cerr << "[PhysicsWorld] createScene failed\n";
-            return false;
-        }
+        m_world = std::make_unique<SunvoltumPhysics::World>(
+            SunvoltumPhysics::Vector3(0.0f, gravityY, 0.0f)
+        );
 
         m_initialized = true;
-        std::cout << "[PhysicsWorld] Init OK (gravity=" << gravityY << ")\n";
+        std::cout << "[PhysicsWorld] SunvoltumPhysics::World Init OK (gravity=" << gravityY << ")\n";
         return true;
     }
 
@@ -51,23 +28,23 @@ namespace Sunvoltum {
     {
         if (!m_initialized) return;
 
-        PxSafeRelease(m_scene);
+        m_world.reset();
         m_initialized = false;
         std::cout << "[PhysicsWorld] Shutdown\n";
     }
 
     void PhysicsWorld::Step(float dt)
     {
-        if (!m_initialized || dt <= 0.0f) return;
-
-        m_scene->simulate(dt);
-        m_scene->fetchResults(true); // true = блокирует до завершения шага
+        if (!m_initialized || !m_world || dt <= 0.0f) return;
+        m_world->Step(dt);
     }
 
     void PhysicsWorld::SetGravity(float gravityY)
     {
-        if (m_scene)
-            m_scene->setGravity(px::PxVec3(0.0f, gravityY, 0.0f));
+        if (m_world)
+        {
+            m_world->SetGravity(SunvoltumPhysics::Vector3(0.0f, gravityY, 0.0f));
+        }
     }
 
 } // namespace Sunvoltum

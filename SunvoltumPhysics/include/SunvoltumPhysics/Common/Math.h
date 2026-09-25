@@ -85,6 +85,19 @@ namespace SunvoltumPhysics {
             return {0.0f, 0.0f, 0.0f, 1.0f};
         }
 
+        Quaternion Conjugate() const {
+            return {-x, -y, -z, w};
+        }
+
+        Quaternion Inversed() const {
+            float lenSq = x * x + y * y + z * z + w * w;
+            if (lenSq > EPSILON * EPSILON) {
+                float inv = 1.0f / lenSq;
+                return {-x * inv, -y * inv, -z * inv, w * inv};
+            }
+            return {0.0f, 0.0f, 0.0f, 1.0f};
+        }
+
         static Quaternion FromAxisAngle(const Vector3& axis, float angleRadians) {
             float half = angleRadians * 0.5f;
             float s = std::sin(half);
@@ -110,6 +123,26 @@ namespace SunvoltumPhysics {
             };
         }
 
+        Matrix3x3 operator+(const Matrix3x3& r) const {
+            Matrix3x3 out;
+            for (int i = 0; i < 3; ++i) {
+                for (int j = 0; j < 3; ++j) {
+                    out.m[i][j] = m[i][j] + r.m[i][j];
+                }
+            }
+            return out;
+        }
+
+        Matrix3x3 operator-(const Matrix3x3& r) const {
+            Matrix3x3 out;
+            for (int i = 0; i < 3; ++i) {
+                for (int j = 0; j < 3; ++j) {
+                    out.m[i][j] = m[i][j] - r.m[i][j];
+                }
+            }
+            return out;
+        }
+
         Matrix3x3 operator*(const Matrix3x3& r) const {
             Matrix3x3 out;
             for (int i = 0; i < 3; ++i) {
@@ -128,6 +161,39 @@ namespace SunvoltumPhysics {
                 }
             }
             return out;
+        }
+
+        Matrix3x3 Inversed() const {
+            float det = m[0][0] * (m[1][1] * m[2][2] - m[1][2] * m[2][1])
+                      - m[0][1] * (m[1][0] * m[2][2] - m[1][2] * m[2][0])
+                      + m[0][2] * (m[1][0] * m[2][1] - m[1][1] * m[2][0]);
+
+            if (std::abs(det) < EPSILON * EPSILON) {
+                return Matrix3x3();
+            }
+
+            float invDet = 1.0f / det;
+            Matrix3x3 res;
+            res.m[0][0] =  (m[1][1] * m[2][2] - m[1][2] * m[2][1]) * invDet;
+            res.m[0][1] = -(m[0][1] * m[2][2] - m[0][2] * m[2][1]) * invDet;
+            res.m[0][2] =  (m[0][1] * m[1][2] - m[0][2] * m[1][1]) * invDet;
+
+            res.m[1][0] = -(m[1][0] * m[2][2] - m[1][2] * m[2][0]) * invDet;
+            res.m[1][1] =  (m[0][0] * m[2][2] - m[0][2] * m[2][0]) * invDet;
+            res.m[1][2] = -(m[0][0] * m[1][2] - m[0][2] * m[1][0]) * invDet;
+
+            res.m[2][0] =  (m[1][0] * m[2][1] - m[1][1] * m[2][0]) * invDet;
+            res.m[2][1] = -(m[0][0] * m[2][1] - m[0][1] * m[2][0]) * invDet;
+            res.m[2][2] =  (m[0][0] * m[1][1] - m[0][1] * m[1][0]) * invDet;
+            return res;
+        }
+
+        static Matrix3x3 SkewSymmetric(const Vector3& v) {
+            Matrix3x3 res;
+            res.m[0][0] =  0.0f; res.m[0][1] = -v.z;  res.m[0][2] =  v.y;
+            res.m[1][0] =  v.z;  res.m[1][1] =  0.0f; res.m[1][2] = -v.x;
+            res.m[2][0] = -v.y;  res.m[2][1] =  v.x;  res.m[2][2] =  0.0f;
+            return res;
         }
 
         static Matrix3x3 FromQuaternion(const Quaternion& q) {

@@ -1,29 +1,15 @@
-﻿#pragma once
+#pragma once
 
 #include "PhysicsCommon.h"
 #include "../Types/CFrame.h"
 #include "../Types/Vector3.h"
 #include "../Types/Shape.h"
+#include <memory>
 
 namespace Sunvoltum {
 
     class PhysicsWorld;
 
-    // PhysicsBody — обёртка над одним PhysX-актором (static или dynamic rigid body).
-    //
-    // Соответствие типам:
-    //   Anchored=true  → PxRigidStatic  (не двигается, не получает силы)
-    //   Anchored=false → PxRigidDynamic (полная симуляция)
-    //
-    // Форма ShapePart::Shape маппится на примитивные геометрии PhysX:
-    //   Block    → PxBoxGeometry    (halfExtents = Size/2)
-    //   Ball     → PxSphereGeometry (radius = min(Size)/2)
-    //   Cylinder → PxCapsuleGeometry (radius = Size.X/2, halfHeight = Size.Y/2)
-    //
-    // Материал захардкожен под пластик:
-    //   staticFriction  = 0.50
-    //   dynamicFriction = 0.40
-    //   restitution     = 0.20
     class PhysicsBody
     {
     public:
@@ -36,20 +22,8 @@ namespace Sunvoltum {
         PhysicsBody(PhysicsBody&&) noexcept;
         PhysicsBody& operator=(PhysicsBody&&) noexcept;
 
-        // Создать актор и добавить его в сцену.
-        // physics    — из PhysicsManager::GetPhysics()
-        // scene      — из PhysicsWorld::GetScene()
-        // cf         — начальная позиция/ориентация
-        // size       — ShapePart::Size (полный размер, не half-extents)
-        // shape      — тип примитива
-        // anchored   — статик или динамик
-        // canCollide — если false, shape не участвует в коллизиях (но гравитация работает)
-        // kinematic  — если true и anchored=false: PxRigidDynamic с eKINEMATIC.
-        //              PhysX не симулирует тело (нет гравитации), но оно участвует
-        //              в коллизиях.
         bool Init(
-            px::PxPhysics* physics,
-            px::PxScene*   scene,
+            PhysicsWorld*  world,
             const CFrame&  cf,
             const Vector3& size,
             Shape          shape,
@@ -58,94 +32,43 @@ namespace Sunvoltum {
             bool           kinematic  = false
         );
 
-        // Удалить актор из сцены и освободить ресурсы.
-        void Shutdown(px::PxScene* scene);
+        void Shutdown(PhysicsWorld* world);
 
         bool IsInitialized() const { return m_initialized; }
         bool IsAnchored()    const { return m_anchored;    }
 
-        // Включить/выключить коллизии на лету (меняет флаги shape без пересоздания актора).
         void SetCanCollide(bool canCollide);
-
-        // Сменить anchored-режим на лету: пересоздаёт актор как Static или Dynamic.
-        // physics/scene нужны для удаления старого и создания нового актора.
-        void SetAnchored(bool anchored, px::PxPhysics* physics, px::PxScene* scene);
-
-        // Заморозить вращение по осям X и Z (только dynamic).
-        // Используется для Humanoid-тел: персонаж не должен заваливаться.
+        void SetAnchored(bool anchored, PhysicsWorld* world);
         void LockUpright();
 
-        // Изменить размер тела (обновляет геометрию PhysX shape без пересоздания актора).
         void Resize(const Vector3& newSize);
+        void Reshape(Shape newShape);
 
-        // Изменить форму тела (пересоздаёт геометрию; актор остаётся тем же).
-        void Reshape(Shape newShape, px::PxPhysics* physics, px::PxScene* scene);
+        std::shared_ptr<SunvoltumPhysics::RigidBody> GetRigidBody() const { return m_body; }
 
-        // Получить сырой указатель на PxRigidActor (для raycast-фильтрации).
-        px::PxRigidActor* GetActor() const { return m_actor; }
-
-        // Получить текущий CFrame (позиция + ориентация) из актора.
         CFrame  GetCFrame()       const;
-
-        // Получить линейную скорость (только dynamic).
         Vector3 GetLinearVelocity()  const;
-
-        // Получить угловую скорость (только dynamic).
         Vector3 GetAngularVelocity() const;
 
-        // --- Запись состояния DataModel → PhysX ---
-
-        // Телепортировать актор (установить позицию напрямую, без физики).
-        // Для кинематических тел используйте SetKinematicTarget.
         void SetCFrame(const CFrame& cf);
-
-        // Установить линейную скорость (только dynamic, не кинематический).
         void SetLinearVelocity(const Vector3& v);
-
-        // Установить угловую скорость (только dynamic, не кинематический).
         void SetAngularVelocity(const Vector3& v);
 
-        // Кинематический режим (joints).
-        //
-        // Кинематическое тело — это PxRigidDynamic с флагом eKINEMATIC:
-        //   • PhysX НЕ применяет гравитацию и силы.
-        //   • Тело двигается только через SetKinematicTarget.
-        //   • Участвует в коллизиях: другие динамические тела отскакивают от него.
-        // -----------------------------------------------------------------------
         bool IsKinematic() const { return m_kinematic; }
-
-        // Переключить кинематический режим на лету (только для dynamic-актора).
-        // Не пересоздаёт актор — просто меняет флаг eKINEMATIC.
         void SetKinematic(bool kinematic);
-
-        // Установить целевую позицию для кинематического тела.
-        // PhysX переместит тело к этой позиции на следующем шаге симуляции,
-        // правильно обновив broad-phase и контакты.
-        // Вызывать каждый тик когда нужно переместить кинематическое тело.
         void SetKinematicTarget(const CFrame& cf);
-
-        // Разбудить тело если оно в sleep-режиме (только dynamic non-kinematic).
-        // PhysX засыпает тела когда скорость близка к нулю — нужно явно разбудить
-        // ChairSeat после регистрации Weld чтобы гравитация заработала.
         void WakeUp();
 
     private:
-        // Построить PxTransform из Sunvoltum::CFrame
-        static px::PxTransform ToPxTransform(const CFrame& cf);
+        static std::shared_ptr<SunvoltumPhysics::Shape> CreateShape(Shape shape, const Vector3& size);
 
-        // Построить Sunvoltum::CFrame из PxTransform
-        static CFrame FromPxTransform(const px::PxTransform& t);
-
-        px::PxRigidActor* m_actor       = nullptr;
-        px::PxMaterial*   m_material    = nullptr;
-        bool              m_anchored    = false;
-        bool              m_kinematic   = false;   // eKINEMATIC flag на PxRigidDynamic
-        bool              m_canCollide  = true;
-        bool              m_initialized = false;
-
-        // Запоминаем последние Size и Shape чтобы Resize/Reshape могли их использовать
-        Vector3 m_size  = { 1.0f, 1.0f, 1.0f };
-        Shape   m_shape = Shape::Block;
+        std::shared_ptr<SunvoltumPhysics::RigidBody> m_body;
+        bool    m_anchored    = false;
+        bool    m_kinematic   = false;
+        bool    m_canCollide  = true;
+        bool    m_initialized = false;
+        Vector3 m_size        = { 1.0f, 1.0f, 1.0f };
+        Shape   m_shape       = Shape::Block;
     };
 
 } // namespace Sunvoltum

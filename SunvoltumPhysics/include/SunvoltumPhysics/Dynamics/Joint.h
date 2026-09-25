@@ -82,12 +82,16 @@ namespace SunvoltumPhysics {
         float GetMotorImpulse() const { return m_motorImpulse; }
         void SetMotorImpulse(float imp) { m_motorImpulse = imp; }
 
+        const Vector3& GetSwingImpulse() const { return m_swingImpulse; }
+        void SetSwingImpulse(const Vector3& imp) { m_swingImpulse = imp; }
+
     private:
         float m_currentAngle{ 0.0f };
         float m_desiredAngle{ 0.0f };
         float m_maxVelocity{ 3.0f };
         float m_currentVelocity{ 0.0f };
         float m_motorImpulse{ 0.0f };
+        Vector3 m_swingImpulse{ 0.0f, 0.0f, 0.0f };
     };
 
 } // namespace SunvoltumPhysics

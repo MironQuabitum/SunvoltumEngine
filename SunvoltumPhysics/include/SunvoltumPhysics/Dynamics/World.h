@@ -1,6 +1,7 @@
 #pragma once
 
 #include "SunvoltumPhysics/Dynamics/RigidBody.h"
+#include "SunvoltumPhysics/Dynamics/Joint.h"
 #include "SunvoltumPhysics/Collision/NarrowPhase/Contact.h"
 #include "SunvoltumPhysics/Solver/PGSSolver.h"
 #include <vector>
@@ -41,6 +42,21 @@ namespace SunvoltumPhysics {
             return m_manifolds;
         }
 
+        void AddJoint(std::shared_ptr<Joint> joint) {
+            m_joints.push_back(joint);
+        }
+
+        void RemoveJoint(const std::shared_ptr<Joint>& joint) {
+            auto it = std::find(m_joints.begin(), m_joints.end(), joint);
+            if (it != m_joints.end()) {
+                m_joints.erase(it);
+            }
+        }
+
+        const std::vector<std::shared_ptr<Joint>>& GetJoints() const {
+            return m_joints;
+        }
+
         void SetGravity(const Vector3& gravity) { m_gravity = gravity; }
         const Vector3& GetGravity() const { return m_gravity; }
 
@@ -56,6 +72,7 @@ namespace SunvoltumPhysics {
     private:
         Vector3 m_gravity;
         std::vector<std::shared_ptr<RigidBody>> m_bodies;
+        std::vector<std::shared_ptr<Joint>> m_joints;
         std::vector<std::pair<RigidBody*, RigidBody*>> m_broadPhasePairs;
         std::vector<ContactManifold> m_manifolds;
         PGSSolver m_solver;

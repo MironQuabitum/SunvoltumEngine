@@ -147,10 +147,10 @@ endif()
 target_compile_definitions(LibSunvoltum PRIVATE SUNOVER_BUILD_DLL)
 target_include_directories(LibSunvoltum PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
 target_include_directories(LibSunvoltum PRIVATE ${CMAKE_SOURCE_DIR}/SunvoltumRender)
-
+target_include_directories(LibSunvoltum PRIVATE ${CMAKE_SOURCE_DIR}/SunvoltumPhysics/include)
 
 target_link_libraries(LibSunvoltum PRIVATE OpenAL::OpenAL)
-target_link_libraries(LibSunvoltum PRIVATE unofficial::omniverse-physx-sdk::sdk)
+target_link_libraries(LibSunvoltum PRIVATE SunvoltumPhysics)
 target_link_libraries(LibSunvoltum PRIVATE Vorbis::vorbis Vorbis::vorbisfile)
 target_link_libraries(LibSunvoltum PRIVATE unofficial::luau::Luau.Compiler unofficial::luau::Luau.VM)
 target_link_libraries(LibSunvoltum PRIVATE $<IF:$<TARGET_EXISTS:libuv::uv_a>,libuv::uv_a,libuv::uv>)

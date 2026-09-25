@@ -1,4 +1,4 @@
-﻿#include <iostream>
+#include <iostream>
 #include <vector>
 #include <memory>
 #include <chrono>
@@ -8,6 +8,7 @@
 #include <SunvoltumRender/SunvoltumRender.h>
 
 #include "SunvoltumPhysics/Dynamics/World.h"
+#include "SunvoltumPhysics/Dynamics/Joint.h"
 #include "SunvoltumPhysics/Collision/Shapes/BoxShape.h"
 #include "SunvoltumPhysics/Collision/Shapes/SphereShape.h"
 #include "SunvoltumPhysics/Collision/Shapes/PlaneShape.h"
@@ -665,7 +666,7 @@ int main() {
     auto torusShape = std::make_shared<TriangleMeshShape>(torusVerts, torusIdx);
     auto torusBody = std::make_shared<RigidBody>(
         BodyType::Static, torusShape,
-        Transform(Vector3(-22.0f, 3.0f, 8.0f), Quaternion(0, 0, 0, 1))
+        Transform(Vector3(22.0f, 3.0f, 8.0f), Quaternion(0, 0, 0, 1))
     );
     physicsWorld.AddBody(torusBody);
     SunvoltumRender::Objects::MeshObject torusObj(
@@ -689,15 +690,175 @@ int main() {
         CreateIndexedColorMesh(icoVerts, icoIdx, { 0.20f, 0.85f, 0.95f, 1.0f }));
     renderBodies.push_back({ icoBody, icoObj });
 
-    //                                                        PhysicsWorld
-    //         rampBody,        SpawnBox/SpawnSphere.
+    // =======================================================================
+    // 3. Стул (Weld / FixedJoint) из ServerScene.lua
+    // 6 частей: ChairSeat, ChairBack, ChairLegFL, ChairLegFR, ChairLegBL, ChairLegBR
+    // =======================================================================
+    const float CHAIR_X = 10.0f;
+    const float CHAIR_Z = 0.0f;
+    const float CHAIR_DROP_Y = 5.0f;
+    const SunvoltumRender::Types::Color chairColor(0.55f, 0.27f, 0.07f, 1.0f); // дерево
+
+    auto SpawnChairPart = [&](const std::string& name, const Vector3& size, const Vector3& worldPos, float mass, BodyType bType = BodyType::Dynamic) {
+        (void)name;
+        Vector3 halfExtents = size * 0.5f;
+        auto shape = std::make_shared<BoxShape>(halfExtents);
+        auto body = std::make_shared<RigidBody>(bType, shape, Transform(worldPos, Quaternion(0, 0, 0, 1)));
+        body->SetMass(mass);
+        body->SetFriction(0.6f);
+        body->SetRestitution(0.3f);
+        physicsWorld.AddBody(body);
+
+        auto cubeMesh = CreateCubeMesh(chairColor);
+        SunvoltumRender::Objects::MeshObject obj(cubeMesh);
+        obj.SetScale({ size.x, size.y, size.z });
+        renderBodies.push_back({ body, obj });
+        return body;
+    };
+
+    // Сидение
+    auto chairSeat = SpawnChairPart("ChairSeat", Vector3(2.0f, 0.3f, 2.0f), Vector3(CHAIR_X, CHAIR_DROP_Y, CHAIR_Z), 3.0f);
+    chairSeat->SetLinearVelocity(Vector3(0.0f, 46.0f, 0.0f)); // начальный импульс вверх, как в ServerScene.lua
+
+    auto WeldChairPart = [&](const std::string& name, const Vector3& size, const Vector3& localOffset, float mass) {
+        Vector3 partPos = Vector3(CHAIR_X + localOffset.x, CHAIR_DROP_Y + localOffset.y, CHAIR_Z + localOffset.z);
+        auto partBody = SpawnChairPart(name, size, partPos, mass);
+
+        // FixedJoint (Weld): C0 = localOffset, C1 = (0, 0, 0)
+        auto weld = std::make_shared<FixedJoint>(
+            chairSeat.get(), partBody.get(),
+            Transform(localOffset, Quaternion(0, 0, 0, 1)),
+            Transform(Vector3(0, 0, 0), Quaternion(0, 0, 0, 1))
+        );
+        physicsWorld.AddJoint(weld);
+        return partBody;
+    };
+
+    // Спинка: 2.0 x 1.8 x 0.2, смещение (0, 1.05, -0.9)
+    WeldChairPart("ChairBack", Vector3(2.0f, 1.8f, 0.2f), Vector3(0.0f, 1.05f, -0.9f), 1.5f);
+
+    // 4 ножки: 0.3 x 1.5 x 0.3, смещение legDY = -0.9
+    constexpr float legDX = 0.85f;
+    constexpr float legDZ = 0.85f;
+    constexpr float legDY = -0.9f;
+    WeldChairPart("ChairLegFL", Vector3(0.3f, 1.5f, 0.3f), Vector3( legDX, legDY,  legDZ), 0.5f);
+    WeldChairPart("ChairLegFR", Vector3(0.3f, 1.5f, 0.3f), Vector3(-legDX, legDY,  legDZ), 0.5f);
+    WeldChairPart("ChairLegBL", Vector3(0.3f, 1.5f, 0.3f), Vector3( legDX, legDY, -legDZ), 0.5f);
+    WeldChairPart("ChairLegBR", Vector3(0.3f, 1.5f, 0.3f), Vector3(-legDX, legDY, -legDZ), 0.5f);
+
+    // =======================================================================
+    // =======================================================================
+    // 4. Миксер: чаша (дно + 4 стены) и пропеллер на дне
+    // =======================================================================
+    const float MIXER_X = 0.0f;
+    const float MIXER_Z = 0.0f;
+    const float MIXER_FLOOR_Y = 1.0f;
+    const float BOWL_HALF_W = 8.0f; // 16 x 16 чаша
+    const float BOWL_WALL_H = 14.0f; // высота стен 14
+    const float BOWL_WALL_THICK = 0.8f;
+    const float BOWL_BOTTOM_TOP = MIXER_FLOOR_Y + 0.5f; // 1.5f
+
+    auto mixerMetalMesh = CreateCubeMesh(SunvoltumRender::Types::Color(0.28f, 0.30f, 0.35f, 1.0f));
+    auto mixerWallMesh  = CreateCubeMesh(SunvoltumRender::Types::Color(0.35f, 0.38f, 0.45f, 0.95f));
+
+    // Дно чаши: 16 x 1 x 16
+    SpawnBox(Vector3(MIXER_X, MIXER_FLOOR_Y, MIXER_Z),
+             Vector3(BOWL_HALF_W, 0.5f, BOWL_HALF_W),
+             Quaternion(0, 0, 0, 1), mixerMetalMesh, 0.0f, BodyType::Static);
+
+    // 4 стены чаши:
+    float wallCenterY = BOWL_BOTTOM_TOP + BOWL_WALL_H * 0.5f;
+    // Север (+Z)
+    SpawnBox(Vector3(MIXER_X, wallCenterY, MIXER_Z + BOWL_HALF_W + BOWL_WALL_THICK * 0.5f),
+             Vector3(BOWL_HALF_W + BOWL_WALL_THICK, BOWL_WALL_H * 0.5f, BOWL_WALL_THICK * 0.5f),
+             Quaternion(0, 0, 0, 1), mixerWallMesh, 0.0f, BodyType::Static);
+    // Юг (-Z)
+    SpawnBox(Vector3(MIXER_X, wallCenterY, MIXER_Z - BOWL_HALF_W - BOWL_WALL_THICK * 0.5f),
+             Vector3(BOWL_HALF_W + BOWL_WALL_THICK, BOWL_WALL_H * 0.5f, BOWL_WALL_THICK * 0.5f),
+             Quaternion(0, 0, 0, 1), mixerWallMesh, 0.0f, BodyType::Static);
+    // Восток (+X)
+    SpawnBox(Vector3(MIXER_X + BOWL_HALF_W + BOWL_WALL_THICK * 0.5f, wallCenterY, MIXER_Z),
+             Vector3(BOWL_WALL_THICK * 0.5f, BOWL_WALL_H * 0.5f, BOWL_HALF_W),
+             Quaternion(0, 0, 0, 1), mixerWallMesh, 0.0f, BodyType::Static);
+    // Запад (-X)
+    SpawnBox(Vector3(MIXER_X - BOWL_HALF_W - BOWL_WALL_THICK * 0.5f, wallCenterY, MIXER_Z),
+             Vector3(BOWL_WALL_THICK * 0.5f, BOWL_WALL_H * 0.5f, BOWL_HALF_W),
+             Quaternion(0, 0, 0, 1), mixerWallMesh, 0.0f, BodyType::Static);
+
+    // Пропеллер на дне миксера
+    // PropBase: 2.4 x 0.6 x 2.4, Static на дне
+    float propBaseY = BOWL_BOTTOM_TOP + 0.3f; // 1.8f
+    auto propBaseShape = std::make_shared<BoxShape>(Vector3(1.2f, 0.3f, 1.2f));
+    auto propBaseBody = std::make_shared<RigidBody>(
+        BodyType::Static, propBaseShape,
+        Transform(Vector3(MIXER_X, propBaseY, MIXER_Z), Quaternion(0, 0, 0, 1))
+    );
+    physicsWorld.AddBody(propBaseBody);
+    auto propBaseMesh = CreateCubeMesh(SunvoltumRender::Types::Color(0.20f, 0.22f, 0.26f, 1.0f));
+    SunvoltumRender::Objects::MeshObject propBaseObj(propBaseMesh);
+    propBaseObj.SetScale({ 2.4f, 0.6f, 2.4f });
+    renderBodies.push_back({ propBaseBody, propBaseObj });
+
+    // PropShaft: 0.8 x 1.6 x 0.8, Dynamic вал на дне
+    float propShaftHalfH = 0.8f;
+    float propShaftY = propBaseY + 0.3f + propShaftHalfH; // 2.9f
+    auto propShaftShape = std::make_shared<BoxShape>(Vector3(0.4f, propShaftHalfH, 0.4f));
+    auto propShaftBody = std::make_shared<RigidBody>(
+        BodyType::Dynamic, propShaftShape,
+        Transform(Vector3(MIXER_X, propShaftY, MIXER_Z), Quaternion(0, 0, 0, 1))
+    );
+    propShaftBody->SetMass(8.0f);
+    propShaftBody->SetFriction(0.6f);
+    propShaftBody->SetRestitution(0.3f);
+    physicsWorld.AddBody(propShaftBody);
+    auto propShaftMesh = CreateCubeMesh(SunvoltumRender::Types::Color(0.50f, 0.52f, 0.58f, 1.0f));
+    SunvoltumRender::Objects::MeshObject propShaftObj(propShaftMesh);
+    propShaftObj.SetScale({ 0.8f, propShaftHalfH * 2.0f, 0.8f });
+    renderBodies.push_back({ propShaftBody, propShaftObj });
+
+    // Motor6D: PropBase -> PropShaft (вращение вокруг вертикали Y со скоростью 5.0 рад/с)
+    Quaternion rotZ90 = Quaternion::FromAxisAngle(Vector3(0.0f, 0.0f, 1.0f), PI * 0.5f);
+    auto propMotor = std::make_shared<MotorJoint>(
+        propBaseBody.get(), propShaftBody.get(),
+        Transform(Vector3(0.0f, 0.3f, 0.0f), rotZ90),
+        Transform(Vector3(0.0f, -propShaftHalfH, 0.0f), rotZ90)
+    );
+    propMotor->SetMaxVelocity(5.0f); // активное вращение миксера
+    propMotor->SetDesiredAngle(0.0f);
+    physicsWorld.AddJoint(propMotor);
+
+    // PropBlade: размах 13.0 x 0.8 x 0.8, Dynamic лопасть прямо над дном
+    float propBladeY = propShaftY + propShaftHalfH; // 3.7f
+    auto propBladeShape = std::make_shared<BoxShape>(Vector3(6.5f, 0.4f, 0.4f));
+    auto propBladeBody = std::make_shared<RigidBody>(
+        BodyType::Dynamic, propBladeShape,
+        Transform(Vector3(MIXER_X, propBladeY, MIXER_Z), Quaternion(0, 0, 0, 1))
+    );
+    propBladeBody->SetMass(8.0f);
+    propBladeBody->SetFriction(0.5f);
+    propBladeBody->SetRestitution(0.75f); // мощное отбивание и перемешивание мячей
+    physicsWorld.AddBody(propBladeBody);
+    auto propBladeMesh = CreateCubeMesh(SunvoltumRender::Types::Color(0.95f, 0.45f, 0.10f, 1.0f)); // ярко-оранжевая лопасть
+    SunvoltumRender::Objects::MeshObject propBladeObj(propBladeMesh);
+    propBladeObj.SetScale({ 13.0f, 0.8f, 0.8f });
+    renderBodies.push_back({ propBladeBody, propBladeObj });
+
+    // Weld PropShaft -> PropBlade
+    auto propBladeWeld = std::make_shared<FixedJoint>(
+        propShaftBody.get(), propBladeBody.get(),
+        Transform(Vector3(0.0f, propShaftHalfH, 0.0f), Quaternion(0, 0, 0, 1)),
+        Transform(Vector3(0.0f, 0.0f, 0.0f), Quaternion(0, 0, 0, 1))
+    );
+    physicsWorld.AddJoint(propBladeWeld);
+
+    // Rebuild Collider Debug Objects
     RebuildColliderDebugObjects();
 
-    //                                 
+    // Камера направлена прямо в миксер
     SunvoltumRender::Objects::Camera camera;
     camera.SetPerspective(60.0f, static_cast<float>(window->GetWidth()) / static_cast<float>(window->GetHeight()), 0.1f, 1000.0f);
-    camera.SetPosition({ 0.0f, 32.0f, -55.0f });
-    camera.SetRotation({ 26.0f, 0.0f, 0.0f });
+    camera.SetPosition({ 0.0f, 24.0f, -22.0f });
+    camera.SetRotation({ 42.0f, 0.0f, 0.0f });
 
     static SunvoltumRender::Renderer* s_renderer = renderer;
     static SunvoltumRender::Objects::Camera* s_camera = &camera;
@@ -729,6 +890,13 @@ int main() {
     constexpr float STAT_INTERVAL = 1.0f;
     size_t sphereCount = 15, boxCount = 15;
 
+    // Таймер миксера: в первые 10 секунд сверху падают мячи
+    float mixerTimer = 0.0f;
+    float mixerSpawnIntervalTimer = 0.0f;
+    constexpr float MIXER_SPAWN_DURATION = 25.0f; // 10 секунд
+    constexpr float MIXER_SPAWN_INTERVAL = 0.05f; // спавн каждые 0.35 сек
+    bool mixerSpawnAnnounced = false;
+
     while (window && !window->ShouldClose()) {
         window->PollEvents();
 
@@ -736,6 +904,29 @@ int main() {
         float deltaTime = std::chrono::duration<float>(now - lastFrameTime).count();
         lastFrameTime = now;
         if (deltaTime > 0.1f) deltaTime = 0.1f;
+
+        // Автоматический спавн мячей в миксер в первые 10 секунд
+        if (mixerTimer < MIXER_SPAWN_DURATION) {
+            mixerTimer += deltaTime;
+            mixerSpawnIntervalTimer += deltaTime;
+            if (mixerSpawnIntervalTimer >= MIXER_SPAWN_INTERVAL) {
+                mixerSpawnIntervalTimer -= MIXER_SPAWN_INTERVAL;
+                static int s_mixerBallIdx = 0;
+                int colIdx = s_mixerBallIdx++ % 20;
+
+                // Случайное смещение внутри чаши (-4.0 .. +4.0 по X и Z), высота падения 18.0
+                float offX = -4.0f + static_cast<float>((s_mixerBallIdx * 17) % 81) * 0.1f;
+                float offZ = -4.0f + static_cast<float>((s_mixerBallIdx * 31) % 81) * 0.1f;
+                Vector3 spawnPos(MIXER_X + offX, 18.0f, MIXER_Z + offZ);
+
+                auto b = SpawnSphere(spawnPos, 0.85f, sphereMeshCache[colIdx], 2.5f, Vector3(0.0f, -6.0f, 0.0f));
+                AddColliderDebugForBody(b);
+                ++sphereCount;
+            }
+        } else if (!mixerSpawnAnnounced) {
+            mixerSpawnAnnounced = true;
+            std::cout << "[Mixer] 10 seconds elapsed. Ball spawning finished!" << std::endl;
+        }
 
         if (input.IsKeyPressed(SunvoltumManager::KeyCode::Escape)) { window->Close(); break; }
 
@@ -826,6 +1017,32 @@ int main() {
         // --- физика ---
         accumulator += deltaTime;
         while (accumulator >= fixedDt) {
+            // Вращение пропеллера: плавное непрерывное приращение DesiredAngle
+            if (propMotor) {
+                float curDesired = propMotor->GetDesiredAngle();
+                float maxVel = propMotor->GetMaxVelocity();
+                propMotor->SetDesiredAngle(curDesired + maxVel * fixedDt);
+            }
+
+            // Bounce логика стула при ударе о пол (как в SunvoltumServer/main.cpp)
+            if (chairSeat) {
+                Vector3 vel = chairSeat->GetLinearVelocity();
+                if (vel.y <= 0.0f) {
+                    constexpr float CHAIR_BOTTOM = 1.65f;
+                    constexpr float BOUNCE_VEL = 35.0f;
+                    constexpr float RAY_OFFSET = 0.05f;
+                    constexpr float RAY_MAX_DIST = 0.35f;
+
+                    Vector3 pos = chairSeat->GetPosition();
+                    Vector3 rayOrigin(pos.x, pos.y - CHAIR_BOTTOM + RAY_OFFSET, pos.z);
+                    RaycastHit hit;
+                    if (physicsWorld.Raycast(rayOrigin, Vector3(0.0f, -1.0f, 0.0f), RAY_MAX_DIST, hit, chairSeat.get())) {
+                        vel.y = BOUNCE_VEL;
+                        chairSeat->SetLinearVelocity(vel);
+                    }
+                }
+            }
+
             for (int s = 0; s < subSteps; ++s) physicsWorld.Step(subDt);
             accumulator -= fixedDt;
         }

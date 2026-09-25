@@ -122,6 +122,21 @@ namespace SunvoltumPhysics {
         float GetMaxDepenetrationVelocity() const { return m_maxDepenetrationVelocity; }
         void SetMaxDepenetrationVelocity(float v) { m_maxDepenetrationVelocity = v; }
 
+        // Блокировка вращения вокруг осей (аналог PhysX PxRigidDynamicLockFlag, нужен для Humanoid LockUpright)
+        void SetLockAngular(bool lockX, bool lockY, bool lockZ) {
+            m_lockAngularX = lockX;
+            m_lockAngularY = lockY;
+            m_lockAngularZ = lockZ;
+            if (lockX) m_angularVelocity.x = 0.0f;
+            if (lockY) m_angularVelocity.y = 0.0f;
+            if (lockZ) m_angularVelocity.z = 0.0f;
+            UpdateInertiaWorld();
+        }
+
+        bool IsAngularLockedX() const { return m_lockAngularX; }
+        bool IsAngularLockedY() const { return m_lockAngularY; }
+        bool IsAngularLockedZ() const { return m_lockAngularZ; }
+
         const AABB& GetAABB() const { return m_aabb; }
 
         void ApplyForce(const Vector3& force) {
@@ -179,6 +194,11 @@ namespace SunvoltumPhysics {
             Vector3 angularAccel = m_invInertiaWorld * m_torqueAccumulator;
             m_angularVelocity += angularAccel * dt;
 
+            // Zero out locked angular axes
+            if (m_lockAngularX) m_angularVelocity.x = 0.0f;
+            if (m_lockAngularY) m_angularVelocity.y = 0.0f;
+            if (m_lockAngularZ) m_angularVelocity.z = 0.0f;
+
             // Damping (drag and rolling resistance for stability)
             m_linearVelocity *= std::clamp(1.0f - m_linearDamping * dt, 0.0f, 1.0f);
             m_angularVelocity *= std::clamp(1.0f - m_angularDamping * dt, 0.0f, 1.0f);
@@ -200,6 +220,10 @@ namespace SunvoltumPhysics {
 
             // x += v * dt
             m_transform.position += m_linearVelocity * dt;
+
+            if (m_lockAngularX) m_angularVelocity.x = 0.0f;
+            if (m_lockAngularY) m_angularVelocity.y = 0.0f;
+            if (m_lockAngularZ) m_angularVelocity.z = 0.0f;
 
             // Exact rotation for constant world-space ω: q = Δq(ω dt) * q
             // (first-order q += 0.5 ω q dt under-rotates and shears the orientation)
@@ -241,6 +265,20 @@ namespace SunvoltumPhysics {
             Matrix3x3 R = Matrix3x3::FromQuaternion(m_transform.rotation);
             // I_world^-1 = R * I_local^-1 * R^T
             m_invInertiaWorld = R * m_invInertiaLocal * R.Transposed();
+
+            // Zero out locked angular degrees of freedom in inverse inertia
+            if (m_lockAngularX) {
+                m_invInertiaWorld.m[0][0] = 0.0f; m_invInertiaWorld.m[0][1] = 0.0f; m_invInertiaWorld.m[0][2] = 0.0f;
+                m_invInertiaWorld.m[1][0] = 0.0f; m_invInertiaWorld.m[2][0] = 0.0f;
+            }
+            if (m_lockAngularY) {
+                m_invInertiaWorld.m[1][0] = 0.0f; m_invInertiaWorld.m[1][1] = 0.0f; m_invInertiaWorld.m[1][2] = 0.0f;
+                m_invInertiaWorld.m[0][1] = 0.0f; m_invInertiaWorld.m[2][1] = 0.0f;
+            }
+            if (m_lockAngularZ) {
+                m_invInertiaWorld.m[2][0] = 0.0f; m_invInertiaWorld.m[2][1] = 0.0f; m_invInertiaWorld.m[2][2] = 0.0f;
+                m_invInertiaWorld.m[0][2] = 0.0f; m_invInertiaWorld.m[1][2] = 0.0f;
+            }
         }
 
         void UpdateAABB() {
@@ -274,6 +312,10 @@ namespace SunvoltumPhysics {
         float m_maxLinearVelocity{ 1000.0f };
         float m_maxAngularVelocity{ 100.0f };
         float m_maxDepenetrationVelocity{ 50.0f };
+
+        bool m_lockAngularX{ false };
+        bool m_lockAngularY{ false };
+        bool m_lockAngularZ{ false };
 
         AABB m_aabb;
     };

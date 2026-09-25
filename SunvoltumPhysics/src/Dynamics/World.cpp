@@ -20,7 +20,7 @@ namespace SunvoltumPhysics {
         BroadPhase();
         NarrowPhase();
 
-        m_solver.Solve(m_manifolds, dt);
+        m_solver.Solve(m_manifolds, m_joints, dt);
 
         for (auto& body : m_bodies) {
             body->IntegratePositions(dt);
@@ -40,6 +40,18 @@ namespace SunvoltumPhysics {
                 if (bA->GetType() == BodyType::Static && bB->GetType() == BodyType::Static) {
                     continue;
                 }
+
+                // Do not collide bodies connected by an active Joint (matches PhysX joint constraint flag)
+                bool connectedByJoint = false;
+                for (const auto& joint : m_joints) {
+                    if (!joint || !joint->IsEnabled()) continue;
+                    if ((joint->GetBodyA() == bA && joint->GetBodyB() == bB) ||
+                        (joint->GetBodyA() == bB && joint->GetBodyB() == bA)) {
+                        connectedByJoint = true;
+                        break;
+                    }
+                }
+                if (connectedByJoint) continue;
 
                 if (bA->GetAABB().Overlaps(bB->GetAABB())) {
                     m_broadPhasePairs.emplace_back(bA, bB);
