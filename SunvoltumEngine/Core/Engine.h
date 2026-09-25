@@ -1,4 +1,4 @@
-﻿#pragma once
+#pragma once
 
 #include "../LibSunvoltum.h"
 #include "../Types/EngineMode.h"
@@ -39,6 +39,9 @@ namespace Sunvoltum {
 
         /// Текущий режим работы движка
         EngineMode GetMode() const;
+
+        /// Монотонное время работы движка в секундах
+        static double GetEngineTime();
 
         /// Корень объектной иерархии
         DataModel DataModel;

@@ -1,4 +1,4 @@
-﻿#pragma once
+#pragma once
 
 #include <memory>
 #include "../LibSunvoltum.h"
@@ -38,6 +38,11 @@ namespace Sunvoltum {
                               const Vector3& direction,
                               float          maxDist,
                               Instance*      ignoreInst = nullptr) const;
+
+        // Продвинутая сетевая интерполяция для реплицируемых физических объектов
+        void PushNetworkSnapshot(Instance& inst, const CFrame& cf, const Vector3& linVel, const Vector3& angVel, double timestamp);
+        void InterpolateNetworkTransforms(double currentTime);
+        void ResetNetworkInterpolator(Instance& inst, const CFrame& cf);
 
     private:
         struct Impl;

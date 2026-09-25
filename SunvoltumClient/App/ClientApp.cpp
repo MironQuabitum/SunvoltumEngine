@@ -2,6 +2,7 @@
 #include "Environment/ClientSceneInitializer.h"
 #include "Scripting/ClientSide/ClientScriptBridge.h"
 #include <iostream>
+#include <chrono>
 
 namespace Sunvoltum {
 namespace Client {
@@ -18,7 +19,7 @@ namespace Client {
 
         // Инициализация сетевого контроллера
         m_networkController.Init();
-        m_networkController.Connect("127.0.0.1", 7777, "Player1");
+        m_networkController.Connect("127.0.0.1",8888, "Player1");
 
         // Инициализация базового окружения и камеры
         ClientSceneInitializer::InitEnvironment(dm);
@@ -28,7 +29,7 @@ namespace Client {
         Scripting::Client::ClientScriptBridge::Get().Init(&dm);
 
         // Настройка десериализации мира и авто-привязки камеры к персонажу
-        m_networkController.SetupSceneSynchronization(dm, [this, &camera, &dm]()
+        m_networkController.SetupSceneSynchronization(dm, &m_engine.Physics, [this, &camera, &dm]()
         {
             m_cameraController.AttachToCharacter(camera, dm);
         });
@@ -54,6 +55,11 @@ namespace Client {
         {
             if (input.IsKeyPressed(KeyCode::Escape))
                 m_runtime.Stop();
+
+            // Вычисляем плавные интерполированные позиции всех сетевых физических объектов
+            double currentTime = Engine::GetEngineTime();
+            m_engine.Physics.InterpolateNetworkTransforms(currentTime);
+
             Scripting::Client::ClientScriptBridge::Get().FireRenderStepped(static_cast<double>(dt));
         };
 

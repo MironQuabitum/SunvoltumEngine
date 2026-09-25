@@ -41,13 +41,14 @@ namespace Client {
         Net::NetworkClient::Get().Connect(host, port, playerName);
     }
 
-    void ClientNetworkController::SetupSceneSynchronization(DataModel& dm, std::function<void()> onSceneLoaded)
+    void ClientNetworkController::SetupSceneSynchronization(DataModel& dm, PhysicsBridge* physicsBridge, std::function<void()> onSceneLoaded)
     {
         Net::SceneDeserializer::Get().SetDataModel(&dm);
-        Net::SceneDeserializer::Get().SetOnComplete([&dm, onSceneLoaded = std::move(onSceneLoaded)]()
+        Net::SceneDeserializer::Get().SetOnComplete([&dm, physicsBridge, onSceneLoaded = std::move(onSceneLoaded)]()
         {
             std::cout << "[ClientNetworkController] Scene fully loaded from server!\n";
             Net::ClientReplicator::Get().SetDataModel(&dm);
+            Net::ClientReplicator::Get().SetPhysicsBridge(physicsBridge);
             Net::ClientReplicator::Get().PostDeserialize(dm);
 
             if (onSceneLoaded)

@@ -19,7 +19,7 @@ namespace Client {
 
         void Init();
         void Connect(const std::string& host, uint16_t port, const std::string& playerName);
-        void SetupSceneSynchronization(DataModel& dm, std::function<void()> onSceneLoaded);
+        void SetupSceneSynchronization(DataModel& dm, PhysicsBridge* physicsBridge, std::function<void()> onSceneLoaded);
 
         void Poll();
         void Shutdown();

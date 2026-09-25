@@ -1,5 +1,6 @@
-﻿#include "Engine.h"
+#include "Engine.h"
 #include <iostream>
+#include <chrono>
 
 namespace Sunvoltum {
 
@@ -74,6 +75,13 @@ namespace Sunvoltum {
     EngineMode Engine::GetMode() const
     {
         return m_mode;
+    }
+
+    double Engine::GetEngineTime()
+    {
+        static const auto s_engineStartTime = std::chrono::steady_clock::now();
+        auto now = std::chrono::steady_clock::now();
+        return std::chrono::duration<double>(now - s_engineStartTime).count();
     }
 
 } // namespace Sunvoltum

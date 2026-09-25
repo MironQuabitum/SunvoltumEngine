@@ -5,9 +5,12 @@
 #include "../DataModel/InstanceClasses/Motor6D.h"
 #include "../DataModel/InstanceClasses/BasePart.h"
 #include "../Types/CFrameUtils.h"
+#include "../Physics/PhysicsBridge.h"
+#include "../Core/Engine.h"
 
 #include <algorithm>
 #include <iostream>
+#include <chrono>
 
 namespace Sunvoltum {
 namespace Net {
@@ -353,7 +356,37 @@ void ClientReplicator::OnPropertyUpdate(PacketReader& r)
     }
     else
     {
-        inst->SetProperty(propId, value);
+        // Если это BasePart::CFrame и доступен PhysicsBridge — направляем в физический интерполятор
+        if (propId == Classes::BasePart::CFrame && value.Type == PropertyType::CFrame && m_physicsBridge)
+        {
+            // Проверяем Anchored: закрепленные объекты не требуют экстраполяции/интерполяции
+            bool isAnchored = false;
+            auto* anchProp = inst->GetProperty(Classes::BasePart::Anchored);
+            if (anchProp && anchProp->Type == PropertyType::Bool)
+                isAnchored = anchProp->Value.AsBool;
+
+            if (isAnchored)
+            {
+                inst->SetProperty(propId, value);
+            }
+            else
+            {
+                double timestamp = Engine::GetEngineTime();
+
+                Vector3 linVel{};
+                Vector3 angVel{};
+                auto* pVel = inst->GetProperty(Classes::BasePart::PosVelocity);
+                if (pVel && pVel->Type == PropertyType::Vector3) linVel = pVel->Value.AsVector3;
+                auto* rVel = inst->GetProperty(Classes::BasePart::RotVelocity);
+                if (rVel && rVel->Type == PropertyType::Vector3) angVel = rVel->Value.AsVector3;
+
+                m_physicsBridge->PushNetworkSnapshot(*inst, value.Value.AsCFrame, linVel, angVel, timestamp);
+            }
+        }
+        else
+        {
+            inst->SetProperty(propId, value);
+        }
     }
 }
 
@@ -413,6 +446,23 @@ void ClientReplicator::PropagateJoint(JointTracker& joint, const CFrame& part0CF
     }
 
     joint.part1->SetProperty(Classes::BasePart::CFrame, PropertyValue::CFrame(part1CF));
+}
+
+void ClientReplicator::PropagatePart0Joints(Instance* part0Inst, const CFrame& part0CF)
+{
+    if (!part0Inst) return;
+    uintptr_t p0Key = reinterpret_cast<uintptr_t>(part0Inst);
+    auto it = m_part0ToJoints.find(p0Key);
+    if (it == m_part0ToJoints.end()) return;
+
+    for (uintptr_t jKey : it->second)
+    {
+        auto jit = m_joints.find(jKey);
+        if (jit != m_joints.end())
+        {
+            PropagateJoint(jit->second, part0CF);
+        }
+    }
 }
 
 // ---------------------------------------------------------------------------

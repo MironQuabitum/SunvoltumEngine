@@ -28,6 +28,7 @@
 #include "NetworkPacket.h"
 
 namespace Sunvoltum {
+    class PhysicsBridge;
 namespace Net {
 
     class LibSunvoltum ClientReplicator
@@ -93,6 +94,7 @@ namespace Net {
         ClientReplicator& operator=(const ClientReplicator&) = delete;
 
         void SetDataModel(DataModel* dm);
+        void SetPhysicsBridge(PhysicsBridge* pb) { m_physicsBridge = pb; }
 
         void OnInstanceAdded    (PacketReader& r);
         void OnInstanceRemoved  (PacketReader& r);
@@ -112,6 +114,9 @@ namespace Net {
         // Для Motor6D здесь можно будет учитывать DesiredAngle вместо фиксированного C1.
         void PropagateJoint(JointTracker& joint, const CFrame& part0CF);
 
+        // Обновляет все суставы, где part0Inst является Part0 (используется при интерполяции Part0)
+        void PropagatePart0Joints(Instance* part0Inst, const CFrame& part0CF);
+
     private:
         ClientReplicator() = default;
         ~ClientReplicator() = default;
@@ -125,6 +130,7 @@ namespace Net {
         std::unordered_map<uintptr_t, std::vector<uintptr_t>>   m_part1ToJoints;
 
         DataModel* m_dataModel = nullptr;
+        PhysicsBridge* m_physicsBridge = nullptr;
         std::unordered_map<PropKey, uint32_t, PropKeyHash> m_lastUpdateSeq;
     };
 

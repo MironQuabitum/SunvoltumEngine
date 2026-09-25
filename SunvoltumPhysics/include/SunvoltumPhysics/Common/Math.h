@@ -104,6 +104,44 @@ namespace SunvoltumPhysics {
             Vector3 na = axis.Normalized();
             return {na.x * s, na.y * s, na.z * s, std::cos(half)};
         }
+
+        float Dot(const Quaternion& r) const {
+            return x * r.x + y * r.y + z * r.z + w * r.w;
+        }
+
+        static Quaternion Slerp(const Quaternion& q0, const Quaternion& q1, float t) {
+            t = std::clamp(t, 0.0f, 1.0f);
+            float cosTheta = q0.Dot(q1);
+            Quaternion target = q1;
+
+            if (cosTheta < 0.0f) {
+                target = Quaternion(-q1.x, -q1.y, -q1.z, -q1.w);
+                cosTheta = -cosTheta;
+            }
+
+            if (cosTheta > 0.9995f) {
+                // Линейная интерполяция при очень близких углах (избегаем деления на ноль)
+                Quaternion res(
+                    q0.x + t * (target.x - q0.x),
+                    q0.y + t * (target.y - q0.y),
+                    q0.z + t * (target.z - q0.z),
+                    q0.w + t * (target.w - q0.w)
+                );
+                return res.Normalized();
+            }
+
+            float theta = std::acos(cosTheta);
+            float sinTheta = std::sin(theta);
+            float w0 = std::sin((1.0f - t) * theta) / sinTheta;
+            float w1 = std::sin(t * theta) / sinTheta;
+
+            return Quaternion(
+                w0 * q0.x + w1 * target.x,
+                w0 * q0.y + w1 * target.y,
+                w0 * q0.z + w1 * target.z,
+                w0 * q0.w + w1 * target.w
+            ).Normalized();
+        }
     };
 
     struct Matrix3x3 {

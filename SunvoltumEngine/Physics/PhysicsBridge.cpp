@@ -21,6 +21,8 @@
 #include "../Types/RaycastResult.h"
 #include "../Types/CFrameUtils.h"
 #include "../Types/Matrix3x3.h"
+#include <SunvoltumPhysics/Dynamics/NetworkInterpolator.h>
+#include "../Network/ClientReplicator.h"
 #include <unordered_map>
 #include <unordered_set>
 #include <vector>
@@ -144,6 +146,9 @@ namespace Sunvoltum {
 
         std::unordered_map<uintptr_t, HumanoidEntry> humanoids;
 
+        // Сетевые интерполяторы для плавного рендеринга объектов на клиенте
+        std::unordered_map<uintptr_t, SunvoltumPhysics::NetworkInterpolator> interpolators;
+
         void RegisterHumanoid(Instance* humanoidInst);
         void SyncHumanoidTurn(float dt);
     };
@@ -231,6 +236,7 @@ namespace Sunvoltum {
 
         m_impl->jointTokens.clear();
         m_impl->humanoids.clear();
+        m_impl->interpolators.clear();
 
         // Удаляем Joints из SunvoltumPhysics::World
         for (auto& [key, entry] : m_impl->joints)
@@ -881,6 +887,68 @@ namespace Sunvoltum {
         }
 
         return result;
+    }
+
+    // -----------------------------------------------------------------------
+    // Network Interpolation Implementation
+    // -----------------------------------------------------------------------
+    void PhysicsBridge::PushNetworkSnapshot(
+        Instance& inst, const CFrame& cf, const Vector3& linVel, const Vector3& angVel, double timestamp)
+    {
+        if (!m_impl) return;
+
+        uintptr_t key = reinterpret_cast<uintptr_t>(&inst);
+        auto& interpolator = m_impl->interpolators[key];
+
+        SunvoltumPhysics::TransformSnapshot snap;
+        snap.timestamp = timestamp;
+        snap.transform = ToPhysicsTransform(cf);
+        snap.linearVelocity = ToPhysicsVec3(linVel);
+        snap.angularVelocity = ToPhysicsVec3(angVel);
+
+        interpolator.PushSnapshot(snap);
+    }
+
+    void PhysicsBridge::ResetNetworkInterpolator(Instance& inst, const CFrame& cf)
+    {
+        if (!m_impl) return;
+        uintptr_t key = reinterpret_cast<uintptr_t>(&inst);
+        auto it = m_impl->interpolators.find(key);
+        if (it != m_impl->interpolators.end())
+        {
+            it->second.Reset(ToPhysicsTransform(cf));
+        }
+    }
+
+    void PhysicsBridge::InterpolateNetworkTransforms(double currentTime)
+    {
+        if (!m_impl) return;
+
+        for (auto& [key, interpolator] : m_impl->interpolators)
+        {
+            if (!interpolator.IsInitialized()) continue;
+
+            Instance* inst = reinterpret_cast<Instance*>(key);
+            if (!inst) continue;
+
+            SunvoltumPhysics::Transform outTransform;
+            SunvoltumPhysics::Vector3 outLinVel;
+            SunvoltumPhysics::Vector3 outAngVel;
+
+            if (interpolator.Evaluate(currentTime, outTransform, outLinVel, outAngVel))
+            {
+                CFrame smoothCF = FromPhysicsTransform(outTransform);
+
+                // Записываем плавный CFrame в инстанс.
+                // Флаг inSyncOut предотвращает срабатывание обратной записи в физическое тело.
+                m_impl->inSyncOut = true;
+                inst->SetProperty(Classes::BasePart::CFrame, PropertyValue::CFrame(smoothCF));
+                m_impl->inSyncOut = false;
+
+                // Немедленно обновляем зависимые части по суставам (Weld, Motor6D)
+                Net::ClientReplicator::Get().PropagatePart0Joints(inst, smoothCF);
+            }
+        }
     }
 
     // -----------------------------------------------------------------------
